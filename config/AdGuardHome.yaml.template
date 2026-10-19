@@ -1,0 +1,49 @@
+# AdGuardHomeFree P0-T1 config template (installed to $AGHF_DATA/data/AdGuardHome.yaml)
+# Baseline: AdGuard Home default config shape; P0 minimal subset.
+# customize.sh: 32-hex random admin password -> aghbridge gen-hash -> sed replace.
+# INV-04: user_rules stays empty here; no $important blocking rules in P0.
+# aghf_schema block is reserved for P1-T4.
+
+users:
+  - name: admin
+    password: "__AGHF_ADMIN_HASH__"
+    auth_attempts: 5
+    block_auth_min: 15
+  - name: root
+    password: "__AGHF_ADMIN_HASH__"
+    auth_attempts: 5
+    block_auth_min: 15
+
+dns:
+  bind_hosts:
+    - 127.0.0.1
+  port: 5353
+  upstream_dns:
+    - 223.5.5.5
+    - 119.29.29.29
+  upstream_mode: load_balance
+  cache_enabled: true
+  cache_size: 52428800
+  cache_ttl_min: 600
+  cache_ttl_max: 3600
+  edns_client_subnet:
+    enabled: false
+
+filters:
+  - name: AdGuard DNS filter
+    enabled: true
+    url: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt"
+    id: -1
+
+whitelist_filters: []
+
+user_rules: []
+
+web:
+  enabled: true
+  addresses:
+    - 127.0.0.1:3000
+
+log:
+  verbose: false
+  local_time: true

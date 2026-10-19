@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AGHF state files (P0)",
+  "oneOf": [
+    {
+      "title": "dns snapshot (dns_snapshot_<netid>.json)",
+      "type": "object",
+      "properties": {
+        "netid": { "type": "integer", "minimum": 0 },
+        "servers": { "type": "array", "items": { "type": "string" } },
+        "captured": { "type": "string" }
+      },
+      "required": ["netid", "servers", "captured"],
+      "additionalProperties": false
+    },
+    {
+      "title": "ctl state (ctl.json)",
+      "type": "object",
+      "properties": {
+        "state": { "enum": ["IDLE", "WAIT_NET", "INSTALL", "VERIFY", "RUNNING", "ROLLBACK"] },
+        "netid": { "type": "integer", "minimum": 0 },
+        "ts": { "type": "string" }
+      },
+      "required": ["state", "ts"],
+      "additionalProperties": false
+    }
+  ]
+}

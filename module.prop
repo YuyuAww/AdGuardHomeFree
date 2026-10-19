@@ -1,0 +1,6 @@
+id=AdGuardHomeFree
+name=AdGuardHomeFree
+description=Systemless AdGuard Home DNS filter with WebUI for KernelSU/APatch
+version=v0.0.1-phase0
+versionCode=1
+author=AGHF Team

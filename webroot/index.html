@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AdGuardHomeFree</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; background: #111; color: #eee; }
+  .card { border: 1px solid #333; border-radius: 8px; padding: 12px; margin: 10px 0; }
+  .card h3 { margin: 0 0 8px; font-size: 14px; }
+  .ok { color: #4caf50; } .warn { color: #ff9800; } .err { color: #f44336; }
+  a { color: #64b5f6; }
+  code { background: #222; padding: 1px 4px; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h2>AdGuardHomeFree</h2>
+
+<div class="card" id="probe-card"><h3>Bridge Probe</h3><p>Probing…</p></div>
+
+<div class="card" id="status-card"><h3>AGH Status</h3><p>Unknown</p></div>
+
+<div class="card">
+  <h3>Links</h3>
+  <p><a href="http://127.0.0.1:3000">AGH Web UI (127.0.0.1:3000)</a></p>
+  <p><a href="http://127.0.0.1:3001/status">Bridge /status</a></p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
