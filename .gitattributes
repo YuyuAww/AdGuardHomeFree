@@ -1,0 +1,8 @@
+# Device-side module files must stay LF (Android /system/bin/sh chokes on CRLF).
+*.sh text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.go text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.prop text eol=lf
