@@ -59,9 +59,21 @@ else
   printf 'admin:%s\n' "$PASS" > "$CRED"
   chmod 600 "$CRED"
 
+  # Bridge auth token (IMP-02): random secret gating aghbridge write actions.
+  TOKEN_FILE="$STATE_DIR/bridge_token"
+  printf '%s\n' "$(head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$TOKEN_FILE"
+  chmod 600 "$TOKEN_FILE"
+
   # Tell the operator where the password lives; do not print it here in logs.
   ui_print "- AdGuardHomeFree: admin password generated (see $CRED, root only)"
 fi
+
+# Idempotent backstop: if the token file is missing (e.g. state wiped but
+# module kept), regenerate it so write actions are gated by a fresh secret.
+[ -s "$STATE_DIR/bridge_token" ] || {
+  printf '%s\n' "$(head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$STATE_DIR/bridge_token"
+  chmod 600 "$STATE_DIR/bridge_token"
+}
 
 chmod 640 "$YAML" 2>/dev/null
 ui_print "- AdGuardHomeFree: customize done"

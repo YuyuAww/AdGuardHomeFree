@@ -49,6 +49,7 @@ else
 fi
 
 # ---- P0 stub of the supervision loop (main loop lands in P2-T5) ----
-sh "$MODDIR/supervise.sh" >/dev/null 2>&1
+# P0-T1 step 5 contract: common/supervise.sh
+sh "$MODDIR/common/supervise.sh" >/dev/null 2>&1
 
 aghf_log INFO P0-T1 "service.sh done impl=$AGHF_ROOT_IMPL"

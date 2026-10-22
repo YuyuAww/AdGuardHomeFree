@@ -16,16 +16,34 @@ WebUI 桥接通道（`aghbridge`）供模块页打开 AGH 管理界面。
 ## 目录结构
 
 ```
-module.prop / customize.sh / service.sh / post-fs-data.sh / supervise.sh / uninstall.sh
-common/    logger.sh rootenv.sh iptables.sh dnsresolver.sh aghfctl.sh   # 全部可 source
+module.prop / customize.sh / service.sh / post-fs-data.sh / uninstall.sh
+common/    logger.sh rootenv.sh iptables.sh dnsresolver.sh aghfctl.sh supervise.sh   # 全部可 source
 webroot/   index.html app.js                                            # 模块 WebUI
 config/    AdGuardHome.yaml.template state-schema.json
-src/aghbridge/  Go 源码（gen-hash 子命令 + /status + /exec 最小白名单）
+src/aghbridge/  Go 源码（gen-hash 子命令 + /status + /exec 最小白名单 + 写类 action token 门）
 bin/       AdGuardHome (v0.107.79 arm64)  aghbridge (交叉编译产物)
 scripts/   phase0_accept.sh (设备侧 P0-T4 验收)
 ```
 
 数据目录固定为 `/data/adb/aghf/{data,logs,run,state}`（§1.1），日志 1MiB 滚动。
+
+## 版本锁定（IMP-06）
+
+- **AdGuardHome `v0.107.79`**（arm64），双 sha256 钉版（GitHub Actions 构建时校验）：
+  - tarball `AdGuardHome_linux_arm64.tar.gz` = `3f7893c1...769c1ae`
+  - 解压后二进制 `bin/AdGuardHome` = `64a9b6fc...d2283c8`
+- 升级 AGH 时：更新 `.github/workflows/build-release.yml` 的 `AGH_VERSION` 与两个 sha256，
+  重新打 tag 发布；`bin/AdGuardHome` 的本地拷贝由 CI 覆盖，不手工提交二进制漂移。
+- `aghbridge` 从 `src/aghbridge` 每次构建（go.mod 钉 `go 1.24` + `golang.org/x/crypto v0.31.0`）。
+
+## 控制桥认证边界（IMP-02）
+
+- `/exec` 只读白名单（`get_status`）无需凭据，行为与手册 P0-T2 验收命令一致
+  （非白名单 action → 403）。
+- 写类 action（`start/stop/install/rollback/reload`，P1-T2 实现）现在即被门控：
+  需 `X-AGHF-Token` 头匹配 `$AGHF_STATE/bridge_token`（customize.sh 首装生成，chmod 600），
+  缺失/错误 → 401；正确 → 501（P0 尚未实现处理逻辑，P1-T2 落地）。
+- token 文件内容永不返回调用方、不入日志。
 
 ## 设计偏差（用户决策）
 

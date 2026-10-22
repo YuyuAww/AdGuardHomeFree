@@ -60,7 +60,7 @@ jobs:
           zip_name="AdGuardHomeFree-${tag}-module.zip"
           zip -r "$zip_name" \
             module.prop \
-            customize.sh service.sh post-fs-data.sh supervise.sh uninstall.sh \
+            customize.sh service.sh post-fs-data.sh uninstall.sh \
             common config webroot scripts \
             bin/AdGuardHome bin/aghbridge \
             LICENSE

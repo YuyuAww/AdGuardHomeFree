@@ -2,6 +2,10 @@
 # AdGuardHomeFree post-fs-data.sh (P0-T1)
 # Early-boot probe stage. INV-06: this stage must NOT start AGH and must NOT
 # install iptables — probe only.
+# IMP-03 clarification: the only write performed here is probe_kv.txt under
+# $AGHF_STATE (our own state dir, created by customize.sh). That is bookkeeping,
+# not a system modification, and is explicitly allowed by INV-06, which
+# forbids starting AGH / touching iptables at post-fs-data time.
 
 MODDIR="${MODPATH:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
 . "$MODDIR/common/logger.sh"
