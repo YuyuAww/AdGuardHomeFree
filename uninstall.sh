@@ -11,7 +11,8 @@ rootenv_probe
 _rc=$?
 
 if [ "$_rc" -eq 0 ]; then
-  AGHFCTL_LIB=1 sh "$MODDIR/aghfctl.sh" rollback
+  # CLI mode (not AGHFCTL_LIB): main dispatches "rollback".
+  sh "$MODDIR/common/aghfctl.sh" rollback
   aghf_log INFO P0-T1 "uninstall: rollback rc=$?"
 fi
 

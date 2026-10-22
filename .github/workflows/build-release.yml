@@ -1,0 +1,95 @@
+name: Build & Release
+
+# Build the module (aghbridge from source + pinned AdGuardHome arm64 binary)
+# and publish a module zip to GitHub Releases.
+#
+#   - push to main  -> build + verify, upload zip as artifact (no release)
+#   - push tag v*   -> build + verify + create/publish GitHub Release
+#
+# INV-10: only arm64 artifacts are ever committed/released.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      zip_name: ${{ steps.meta.outputs.zip_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/aghbridge/go.mod
+          cache-dependency-path: src/aghbridge/go.sum
+
+      - name: Build aghbridge (linux/arm64, static)
+        working-directory: src/aghbridge
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+            go build -ldflags "-s -w" -o ../../bin/aghbridge .
+          file ../../bin/aghbridge
+
+      - name: Download pinned AdGuardHome (arm64)
+        env:
+          AGH_VERSION: v0.107.79
+          AGH_TARBALL_SHA256: 3f7893c18e8aaadc456d0452839190561c306ca95175a2254958be80a769c1ae
+          AGH_BINARY_SHA256: 64a9b6fc6269247f1973cddbf285aa6ce866d11bd29546b0f4135ba31d2283c8
+        run: |
+          set -euo pipefail
+          url="https://github.com/AdguardTeam/AdGuardHome/releases/download/${AGH_VERSION}/AdGuardHome_linux_arm64.tar.gz"
+          curl -fsSL "$url" -o agh.tar.gz
+          echo "${AGH_TARBALL_SHA256}  agh.tar.gz" | sha256sum -c -
+          tar -xzf agh.tar.gz
+          install -m 755 AdGuardHome/AdGuardHome bin/AdGuardHome
+          echo "${AGH_BINARY_SHA256}  bin/AdGuardHome" | sha256sum -c -
+
+      - name: Package module zip
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME:-}" == v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="build-${GITHUB_SHA:0:7}"
+          fi
+          zip_name="AdGuardHomeFree-${tag}-module.zip"
+          zip -r "$zip_name" \
+            module.prop \
+            customize.sh service.sh post-fs-data.sh supervise.sh uninstall.sh \
+            common config webroot scripts \
+            bin/AdGuardHome bin/aghbridge \
+            LICENSE
+          sha256sum "$zip_name" > "$zip_name.sha256"
+          echo "zip_name=${zip_name}" >> "$GITHUB_OUTPUT"
+          echo "zip sha256: $(cat "$zip_name.sha256")"
+
+      - name: Upload module zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.zip_name }}
+          path: |
+            ${{ steps.meta.outputs.zip_name }}
+            ${{ steps.meta.outputs.zip_name }}.sha256
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.zip_name }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: false
+          files: |
+            ${{ needs.build.outputs.zip_name }}
+            ${{ needs.build.outputs.zip_name }}.sha256

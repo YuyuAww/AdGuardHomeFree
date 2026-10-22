@@ -8,8 +8,12 @@
 # 41 netid unavailable, 60 rollback step error.
 #
 # Sourceable: AGHFCTL_LIB=1 skips the CLI main below.
-
-_moddir="${MODPATH:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
+# This file lives in common/; module root is one level up (INV-05).
+if [ -n "$MODPATH" ]; then
+  _moddir="$MODPATH"
+else
+  _moddir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+fi
 . "$_moddir/common/logger.sh"
 AGHF_ROOTENV_LIB=1 . "$_moddir/common/rootenv.sh"
 . "$_moddir/common/iptables.sh"
