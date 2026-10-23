@@ -1,7 +1,9 @@
 // AdGuardHomeFree aghbridge (P0-T2)
 // Minimal status bridge for the module WebUI:
-//   GET  /status  -> {"agh_running":bool,"impl":"kernelsu|apatch|unknown"}
-//   GET|POST /exec -> P0 action whitelist: get_status only; else 403
+//
+//	GET  /status  -> {"agh_running":bool,"impl":"kernelsu|apatch|unknown"}
+//	GET|POST /exec -> P0 action whitelist: get_status only; else 403
+//
 // CORS: Access-Control-Allow-Origin * (+ OPTIONS preflight) so the KSU
 // WebView can call this from a file:// page.
 //

@@ -32,7 +32,7 @@ rootenv_probe() {
   AGHF_STATE="$AGHF_DATA/state"
   AGH_BIN="$MODDIR/bin/AdGuardHome"
   AGH_DNS_PORT="5353"
-  AGH_WEB_PORT="3000"
+  AGH_WEB_PORT="3000" # reserved (AGH http.address, pinned in the yaml); unreferenced in P0
   BRIDGE_PORT="3001"
   BRIDGE_BIN="$MODDIR/bin/aghbridge"
 
@@ -61,6 +61,9 @@ rootenv_probe() {
 
   # ---------- AGHF_BUSYBOX (optional; user decision m00128: do not require) ----
   # Priority: module-bundled bin/busybox -> manager busybox -> toybox -> none.
+  # P0 does not bundle a busybox (m00128), so the two busybox candidates are
+  # dead paths on P0 images; kept so a future re-bundle or a manager that
+  # ships busybox just works. "none" is the documented P0 state.
   case "$AGHF_ROOT_IMPL" in
     apatch)   _bb_cand="$MODDIR/bin/busybox /data/adb/ap/bin/busybox /system/bin/toybox" ;;
     *)        _bb_cand="$MODDIR/bin/busybox /data/adb/ksu/bin/busybox /system/bin/toybox" ;;

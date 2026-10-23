@@ -3,12 +3,34 @@
 # Per-network DNS resolver takeover via netd. INV-09: always snapshot before
 # modifying; every function is idempotent.
 
-# NOTE: netd command surface (getnetdns / resolver setnetdns) is device-facing
-# and still unverified on a real device; see P0-T4 report fields.
+# netd command surface status (verified 2026-10 against AOSP O/P
+# CommandListener.cpp, AOSP Q+/A11/A12/A14 NdcDispatcher.cpp, and community
+# reports - see manual P0-T3 / P0-T4):
+#   - `cmd netd resolver setnetdns <netid> <domains> <dns...>` is the O/P-era
+#     form (domains slot required, may be the empty string); `clearnetdns
+#     <netid>` clears the resolver.
+#   - On Android 10+ the netd NDC "resolver" command family was REMOVED
+#     (resolver moved to a separate "dnsresolver" binder service that shell
+#     `cmd`/`ndc` cannot reach); every resolver command then answers
+#     "Command not recognized".
+#   - "getnetdns" never existed as an NDC command in any AOSP version;
+#     read-back is the DnsAddresses line of `dumpsys connectivity`
+#     (best effort, format drift allowed).
+# Consequence on realistic KSU/APatch targets (A11+): dnsresolver_set fails,
+# aghfctl.sh therefore runs degraded iptables-only mode (writes the
+# $AGHF_STATE/dnsresolver_mode marker, P0-T3 rescope); per-netId binder
+# takeover is P1-T1.
 
 getnetdns() {
   # print the currently configured DNS servers for network $1
-  cmd netd getnetdns "$1" 2>/dev/null
+  # Best-effort read-back via dumpsys connectivity: the netd NDC command
+  # "getnetdns" does not exist in any AOSP version. Prints the DnsAddresses
+  # line of the [netid] block when present; empty on format drift (blind
+  # snapshot; dnsresolver_restore then no-ops honestly).
+  dumpsys connectivity 2>/dev/null | awk -v n="$1" '
+    $0 ~ ("^[ \t]*\\[" n "\\]") && ($0 ~ /type:/ || $0 ~ /Active Network/) { inblk = 1 }
+    inblk && $0 ~ /DnsAddresses/ { print; exit }
+  ' 2>/dev/null
 }
 
 active_netid() {
@@ -37,13 +59,18 @@ dnsresolver_snapshot() {
 
 _dns_servers_from_snapshot() {
   # $1 = netid; echo whitespace-separated server list (may be empty)
+  # Scan ONLY the "servers" array, not the whole file: a whole-file grep of
+  # quoted hex-like tokens also picks up separator tokens such as ":" (the
+  # quoted colon between key and value, e.g. "captured":"...") and would
+  # poison dnsresolver_restore with a bogus server entry.
   _f="$AGHF_STATE/dns_snapshot_${1}.json"
   [ -f "$_f" ] || return 1
-  grep -oE '"[0-9a-fA-F:.]+"' "$_f" | tr -d '"' | tr '\n' ' '
+  sed -n 's/.*"servers":\[\([^]]*\)\].*/\1/p' "$_f" | grep -oE '"[^"]+"' | tr -d '"'
 }
 
 dnsresolver_set() {
-  # $1 = netid, $2 = server (P0: always 127.0.0.1)
+  # $1 = netid, $2 = server (P0: always 127.0.0.1); $2 may be repeated
+  # O/P-era netd surface (see file header); expected to fail on A10+.
   cmd netd resolver setnetdns "$1" "" "$2"
 }
 
@@ -57,7 +84,14 @@ dnsresolver_restore() {
   if [ -n "$_servers" ]; then
     cmd netd resolver setnetdns "$_n" "" $_servers
   else
-    # empty snapshot: clear our override, fall back to system-resolved DNS
-    cmd netd resolver setnetdns "$_n" ""
+    # empty snapshot: nothing was captured (read-back surface unavailable or
+    # no servers configured). If our override could still be in effect
+    # (O/P-era ROM), clearnetdns is the correct primitive; on A10+ it is
+    # unrecognized too - soft-fail with WARN instead of a bogus
+    # under-arg setnetdns call (argc 4 < 5, which O/P would reject).
+    if ! cmd netd resolver clearnetdns "$_n" 2>/dev/null; then
+      aghf_log WARN P0-T3 "restore: clearnetdns unavailable for netid $_n, leaving resolver as-is"
+      return 0
+    fi
   fi
 }

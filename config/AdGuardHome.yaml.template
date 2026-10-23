@@ -1,24 +1,41 @@
 # AdGuardHomeFree P0-T1 config template (installed to $AGHF_DATA/data/AdGuardHome.yaml)
-# Baseline: AdGuard Home default config shape; P0 minimal subset.
+# Baseline: AdGuard Home v0.107.79 default config shape; P0 minimal subset.
 # customize.sh: 32-hex random admin password -> aghbridge gen-hash -> sed replace.
 # INV-04: user_rules stays empty here; no $important blocking rules in P0.
 # aghf_schema block is reserved for P1-T4.
+#
+# P0 anti-loop rule (rescope 2026-10, manual P0-T3 STEP 7): the module's nat
+# REDIRECT sends all local :53 traffic into AGH itself, so plain :53 upstreams
+# would self-redirect and never answer. Upstreams are therefore DoH
+# (TCP 443, not redirected):
+#   - https://223.5.5.5/dns-query  (AliDNS, official IP-direct DoH endpoint)
+#   - https://doh.pub/dns-query    (DNSPod; its IP-direct DoH endpoints were
+#                                    retired on 2024-09-29, domain access)
+# bootstrap_dns (plain IPs) resolves the DoH upstream name and filter URLs;
+# bootstrap queries also traverse the sinkhole and are forwarded by AGH via
+# DoH - no loop. service.sh exports SSL_CERT_DIR for DoH TLS verification.
+#
+# Web UI: the .79 schema has NO `web:` section (silently dropped); the
+# interface binds on top-level `http.address` whose default 0.0.0.0:3000
+# would expose the admin UI on the device network -> pinned to 127.0.0.1.
+
+auth_attempts: 5
+block_auth_min: 15
 
 users:
   - name: admin
     password: "__AGHF_ADMIN_HASH__"
-    auth_attempts: 5
-    block_auth_min: 15
   - name: root
     password: "__AGHF_ADMIN_HASH__"
-    auth_attempts: 5
-    block_auth_min: 15
 
 dns:
   bind_hosts:
     - 127.0.0.1
   port: 5353
   upstream_dns:
+    - "https://223.5.5.5/dns-query"
+    - "https://doh.pub/dns-query"
+  bootstrap_dns:
     - 223.5.5.5
     - 119.29.29.29
   upstream_mode: load_balance
@@ -33,16 +50,13 @@ filters:
   - name: AdGuard DNS filter
     enabled: true
     url: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt"
-    id: -1
 
 whitelist_filters: []
 
 user_rules: []
 
-web:
-  enabled: true
-  addresses:
-    - 127.0.0.1:3000
+http:
+  address: "127.0.0.1:3000"
 
 log:
   verbose: false

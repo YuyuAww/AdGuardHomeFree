@@ -12,6 +12,12 @@
 # Deviation note (user decision m00128, no busybox bundling):
 #   - AGHF_BUSYBOX may be "none"; nslookup-based checks then degrade to
 #     toybox nc reachability checks and verify_dns is reported "degraded".
+# Deviation note (P0-T3 rescope 2026-10, netd resolver surface gone on A10+):
+#   - On Android 10+ targets aghfctl install runs degraded iptables-only
+#     mode (exit 0 + $AGHF_STATE/dnsresolver_mode marker). DNSRESOLVER_
+#     UNAVAILABLE is then an ACCEPTED degradation (manual P0-T4 ON_FAILURE /
+#     section 9), not a hard failure: sinkhole + VERIFY still complete over
+#     pure iptables thanks to the yaml's DoH upstreams.
 
 MODDIR=${0%/*}/..
 [ -n "$MODPATH" ] && MODDIR="$MODPATH"
@@ -136,6 +142,13 @@ case "$install_rc" in
             note "T3 snapshot missing"
             install_rc=2
         }
+        # A10+ targets: netd resolver surface gone -> aghfctl ran degraded
+        # iptables-only mode and left the marker; report the accepted
+        # degradation (manual P0-T4 ON_FAILURE / section 9).
+        if [ -f "$AGHF_STATE/dnsresolver_mode" ]; then
+            dnsresolver="unavailable"
+            add_blocker "DNSRESOLVER_UNAVAILABLE"
+        fi
         ;;
     30)
         iptables_state="fail"
@@ -186,7 +199,10 @@ rollback_rc=0
 if ! "$CTL" rollback >/dev/null 2>&1; then
     rollback_rc=$?
 fi
-no_chain=$(iptables -t nat -L AGHF_OUTPUT 2>&1 | grep -c "No chain")
+# Query with the probed binary (${AGHF_IPTABLES:-iptables}): on an iptables-legacy-only
+# device the nft-flavored "iptables" would report "No chain" for a chain the
+# module installed/removed via legacy, producing a false ROLLBACK_FAIL.
+no_chain=$("${AGHF_IPTABLES:-iptables}" -t nat -L AGHF_OUTPUT 2>&1 | grep -c "No chain")
 note "T3 rollback rc=$rollback_rc no_chain=$no_chain"
 [ "$rollback_rc" -eq 0 ] && [ "$no_chain" -ge 1 ] || {
     note "T3 rollback or chain removal failed"
