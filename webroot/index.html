@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>AdGuard Home Free</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #1a1d24; --border: #2a2e39;
+    --text: #e6e8ee; --muted: #8a90a0; --accent: #4f8cff;
+    --ok: #3ecf8e; --err: #ff5470; --warn: #ffb020;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.5; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { margin-bottom: 20px; }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .card { background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .row .label { font-size: 13px; color: var(--muted); }
+  .row .value { font-size: 14px; font-weight: 600; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.ok  { background: rgba(62,207,142,.15);  color: var(--ok); }
+  .badge.err { background: rgba(255,84,112,.15);  color: var(--err); }
+  .badge.off { background: rgba(138,144,160,.2);  color: var(--muted); }
+  .section-title { font-size: 13px; color: var(--muted); margin: 4px 0 10px; letter-spacing: .05em; }
+  .btn { display: inline-block; background: var(--accent); color: #fff; border: 0;
+    border-radius: 8px; padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+    transition: opacity .15s; }
+  .btn:hover { opacity: .88; }
+  .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .link { display: inline-block; color: var(--accent); text-decoration: none; font-size: 14px; font-weight: 600; }
+  .link:hover { text-decoration: underline; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+  .log { background: #0c0e12; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; font-family: Consolas, "Liberation Mono", monospace; font-size: 12px;
+    color: var(--muted); max-height: 180px; overflow: auto; white-space: pre-wrap; }
+  .log:empty::before { content: "(尚无日志输出)"; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AdGuard Home Free</h1>
+    <p>系统级 DNS 去广告模块 · 模块管理入口</p>
+  </header>
+
+  <section class="card">
+    <div class="section-title">运行状态</div>
+    <div class="row">
+      <span class="label">AdGuard Home 进程</span>
+      <span class="badge off" id="st-proc">未知</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="label">DNS 接管 (port 5591)</span>
+      <span class="badge off" id="st-dns">未知</span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <span class="label">Web 管理台</span>
+      <span class="value" id="st-web">未知</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="section-title">操作</div>
+    <div class="actions">
+      <button class="btn" id="btn-start">启动</button>
+      <button class="btn ghost" id="btn-stop">停止</button>
+      <button class="btn ghost" id="btn-refresh">刷新状态</button>
+      <a class="link" id="btn-admin" target="_blank" rel="noopener">打开 AdGuard Home 管理台 ↗</a>
+    </div>
+    <p class="hint">管理台地址：<span id="admin-url">127.0.0.1:3000</span>（本机回环）</p>
+  </section>
+
+  <section class="card">
+    <div class="section-title">最近日志</div>
+    <div class="log" id="log"></div>
+  </section>
+
+  <p class="hint">
+    配置文件位于 <code>/data/adb/agh/AdGuardHome.yaml</code>，
+    日志位于 <code>/data/adb/agh/logs/</code>。
+    本页面仅在 root 模块环境（KernelSU / APatch）下通过模块 WebUI 访问；
+    实际操作依赖模块自带 API，直接访问本页面不会改变模块状态。
+  </p>
+</div>
+<script>
+(function () {
+  var ADMIN = "http://127.0.0.1:3000";
+  var els = {
+    proc: document.getElementById("st-proc"),
+    dns:  document.getElementById("st-dns"),
+    web:  document.getElementById("st-web"),
+    log:  document.getElementById("log"),
+    admin:document.getElementById("btn-admin"),
+    adminUrl: document.getElementById("admin-url")
+  };
+  els.admin.href = ADMIN;
+  els.adminUrl.textContent = "127.0.0.1:3000";
+
+  function setBadge(el, state, okText, badText) {
+    el.className = "badge " + state;
+    el.textContent = state === "ok" ? okText : (state === "err" ? badText : "未知");
+  }
+
+  // 说明：本页面运行在模块 WebUI 沙箱中，通过 fetch 调用模块内嵌的 status API 刷新。
+  // 若 API 不存在（例如模块未提供），则显示提示并引导用户通过模块管理器操作。
+  function refresh() {
+    fetch("./api/status")
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r); })
+      .then(function (s) {
+        setBadge(els.proc, s.process ? "ok" : "err", "运行中", "未运行");
+        setBadge(els.dns,  s.dns ? "ok" : "off", "已接管", "未接管");
+        els.web.textContent = s.web ? "可用" : "不可用";
+        els.log.textContent = s.log || "(无日志)";
+      })
+      .catch(function () {
+        setBadge(els.proc, "off", "", "");
+        setBadge(els.dns,  "off", "", "");
+        els.web.textContent = "未知";
+        els.log.textContent =
+          "status API 不可用。请通过模块管理器执行 service.sh 以启动/停止模块。\n" +
+          "（本页面仅用于查看与跳转，不直接操作 root 进程。）";
+      });
+  }
+
+  document.getElementById("btn-refresh").addEventListener("click", refresh);
+  document.getElementById("btn-start").addEventListener("click", function () {
+    fetch("./api/start", { method: "POST" }).then(refresh);
+  });
+  document.getElementById("btn-stop").addEventListener("click", function () {
+    fetch("./api/stop", { method: "POST" }).then(refresh);
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>
+
+

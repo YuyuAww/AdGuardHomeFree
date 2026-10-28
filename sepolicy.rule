@@ -1,0 +1,27 @@
+# sepolicy.rule - AdGuardHomeFree 的 SELinux 策略
+# 兼容 KernelSU / APatch（原生支持 sepolicy.rule 格式）。
+# Magisk 用户可忽略本文件（其通过 magiskpolicy/sepolicy.d 兜底）。
+#
+# 策略设计原则（保守）：
+# 1. 不为 AdGuardHome 二进制单独立域（避免各 Android 版本 policy 差异导致不可用）；
+#    进程随执行者 context 运行（通常是 shell / magisk / su 域，已具备所需能力）。
+# 2. 只补充文件标签 + 少量 socket 权限，降低对系统 SELinux 的侵入。
+
+# ---------- 文件标签：让 /data/adb/agh 下运行时文件具备 system_data_file 标签 ----------
+file /data/adb/agh u:object_r:system_data_file:s0
+file /data/adb/agh/logs u:object_r:system_data_file:s0
+file /data/adb/agh/run u:object_r:system_data_file:s0
+
+# ---------- 让执行 shell / magisk / su 域能读写该目录（AdGuardHome 继承其 context） ----------
+allow shell system_data_file { file open read write create getattr unlink rename }
+allow shell system_data_file { dir open read write add_name create search }
+allow magisk system_data_file { file open read write create getattr }
+allow magisk system_data_file { dir open read write add_name create search }
+allow su system_data_file { file open read write create getattr }
+allow su system_data_file { dir open read write add_name create search }
+
+# ---------- DNS 端口监听（127.0.0.1:5591）：允许相关域创建/连接回环 TCP ----------
+allow shell unlabelled { tcp_socket create read write connectto }
+allow magisk unlabelled { tcp_socket create read write connectto }
+allow su unlabelled { tcp_socket create read write connectto }
+

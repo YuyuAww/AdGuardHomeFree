@@ -1,0 +1,13 @@
+dns:
+  bind_hosts:
+    - 127.0.0.1
+  port: 5591
+  upstream_dns:
+    - https://dns.alidns.com/dns-query
+    - https://doh.pub/dns-query
+  bootstrap_dns:
+    - 223.5.5.5
+    - 119.29.29.29
+
+http:
+  address: 127.0.0.1:3000

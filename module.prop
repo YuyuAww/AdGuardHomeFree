@@ -1,0 +1,6 @@
+id=adguardhomefree
+name=AdGuardHomeFree
+version=v1.0.0
+versionCode=1
+author=yourname
+description=System-wide DNS filtering with AdGuardHome for Magisk/KernelSU/APatch
