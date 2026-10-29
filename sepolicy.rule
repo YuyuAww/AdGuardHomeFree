@@ -6,6 +6,9 @@
 # 1. 不为 AdGuardHome 二进制单独立域（避免各 Android 版本 policy 差异导致不可用）；
 #    进程随执行者 context 运行（通常是 shell / magisk / su 域，已具备所需能力）。
 # 2. 只补充文件标签 + 少量 socket 权限，降低对系统 SELinux 的侵入。
+#
+# 说明：若某设备策略未定义 `magisk` 域，本文件会被忽略或仅部分生效；
+#       Magisk / KernelSU / APatch 的模块脚本实际运行在 magisk 域（具备网络权限）。
 
 # ---------- 文件标签：让 /data/adb/agh 下运行时文件具备 system_data_file 标签 ----------
 file /data/adb/agh u:object_r:system_data_file:s0
@@ -20,8 +23,15 @@ allow magisk system_data_file { dir open read write add_name create search }
 allow su system_data_file { file open read write create getattr }
 allow su system_data_file { dir open read write add_name create search }
 
-# ---------- DNS 端口监听（127.0.0.1:5591）：允许相关域创建/连接回环 TCP ----------
-allow shell unlabelled { tcp_socket create read write connectto }
-allow magisk unlabelled { tcp_socket create read write connectto }
-allow su unlabelled { tcp_socket create read write connectto }
-
+# ---------- DNS 端口监听与连接（127.0.0.1:5591 / 0.0.0.0:5591）：允许相关域创建、
+#            绑定（bind/node_bind）、读写与连接回环/任意地址。绑定 0.0.0.0 需要 node_bind，
+#            否则 AdGuardHome 无法在非回环接口上监听（热点客户端接管需要）。 ----------
+allow shell unlabelled { tcp_socket create read write connectto bind }
+allow magisk unlabelled { tcp_socket create read write connectto bind }
+allow su unlabelled { tcp_socket create read write connectto bind }
+allow shell node { node_bind }
+allow magisk node { node_bind }
+allow su node { node_bind }
+allow shell loopback_node { node_bind }
+allow magisk loopback_node { node_bind }
+allow su loopback_node { node_bind }

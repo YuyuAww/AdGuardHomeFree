@@ -3,17 +3,19 @@
 # 由 Magisk / KernelSU / APatch 在卸载模块时调用（部分环境不保证执行）。
 
 MODDIR="$(cd "$(dirname "$0")" && pwd)"
+. "$MODDIR/scripts/common.sh"
 
-# 停止看门狗与 AdGuardHome 进程
-pkill -f "adguardhomefree/watchdog.sh" 2>/dev/null || true
-pkill -f "$MODDIR/bin/AdGuardHome" 2>/dev/null || true
+# 停止看门狗、控制台服务与 AdGuardHome 进程
+$BUSYBOX pkill -f "adguardhomefree/watchdog.sh" 2>/dev/null || true
+$BUSYBOX pkill -f "adguardhomefree/control.sh" 2>/dev/null || true
+$BUSYBOX pkill -f "httpd.*127.0.0.1:$CTRL_PORT_DEFAULT" 2>/dev/null || true
+agh_stop
 sleep 1
 
-# 清理 iptables 规则
+# 清理 iptables 规则（IPv4 + IPv6）
 sh "$MODDIR/scripts/iptables.sh" clear 2>/dev/null || true
 
 # 删除运行时数据（含日志、锁、运行时配置）
-rm -rf /data/adb/agh 2>/dev/null || true
+rm -rf "$RUNTIME_DIR" 2>/dev/null || true
 
 echo "[AGHFREE] uninstall.sh 完成"
-

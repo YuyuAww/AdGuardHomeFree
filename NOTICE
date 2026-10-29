@@ -1,0 +1,25 @@
+AdGuardHomeFree
+================
+
+本项目（模块脚本、打包脚本、配置模板、WebUI 页面）以 Apache License 2.0 授权，
+详见 LICENSE 文件。
+
+第三方组件
+----------
+
+1. AdGuard Home
+   - 版权：AdGuard Software Limited
+   - 许可证：GNU General Public License v3.0 (GPLv3)
+   - 源码：https://github.com/AdguardTeam/AdGuardHome
+   - 说明：本模块在 `bin/AdGuardHome` 中分发 AdGuard Home 官方构建的 Linux arm64
+     （armv7 / amd64）可执行文件。该二进制在各自的许可证下分发；使用/修改/再分发
+     需遵守 GPLv3。构建脚本与 CI 从官方 Release 下载该二进制，未对其源码进行修改。
+
+2. Magisk / KernelSU / APatch
+   - 仅为兼容目标运行时，不随本模块分发。
+   - 分别见 https://github.com/topjohnwu/Magisk 、
+     https://github.com/tiann/KernelSU 、 https://github.com/bmax121/APatch 。
+
+说明
+----
+如本模块与其它组件（含第三方库）存在许可证冲突或疑问，以各自组件自身的许可证为准。

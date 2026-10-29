@@ -4,7 +4,7 @@
 MODDIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$MODDIR/scripts/common.sh"
 
-CFG="/data/adb/agh/AdGuardHome.yaml"
+CFG="$RUNTIME_DIR/AdGuardHome.yaml"
 [ -f "$CFG" ] || CFG="$MODDIR/bin/AdGuardHome.yaml"
 
 MAX_RESTARTS=10   # 重启窗口内最多重启次数
@@ -14,10 +14,15 @@ CHECK_INTERVAL=20
 COUNT=0
 START_TS=$(date +%s)
 
+# 端口就绪探测
+port_ready() {
+    $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$DNS_PORT"
+}
+
 while true; do
     sleep $CHECK_INTERVAL
 
-    if ! $BUSYBOX pgrep -f "$MODDIR/bin/AdGuardHome" > /dev/null 2>&1; then
+    if ! agh_is_running; then
         NOW=$(date +%s)
         # 滑动窗口：超出窗口则重置计数
         if [ $((NOW - START_TS)) -gt $WINDOW ]; then
@@ -33,23 +38,24 @@ while true; do
         fi
 
         log "watchdog: 检测到 AdGuardHome 退出，第 ${COUNT} 次重启"
+        # 主进程不在，先清掉接管规则避免悬空重定向
         sh "$MODDIR/scripts/iptables.sh" clear
-
-        export SSL_CERT_DIR="/system/etc/security/cacerts/"
-        "$MODDIR/bin/AdGuardHome" -c "$CFG" -w "/data/adb/agh" \
-            >> /data/adb/agh/logs/agh.log 2>&1 &
+        agh_start
 
         # 等待端口就绪后再重新接管 DNS
         j=0
         while [ $j -lt 15 ]; do
-            if $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ':5591'; then
+            if port_ready; then
                 break
             fi
             sleep 1
             j=$((j + 1))
         done
-        if $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ':5591'; then
+        if port_ready; then
             sh "$MODDIR/scripts/iptables.sh" apply
+            log "watchdog: 已重新接管 DNS (port $DNS_PORT)"
+        else
+            log "watchdog: 重启后端口未就绪，本次不接管"
         fi
     fi
 done

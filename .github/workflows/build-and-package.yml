@@ -13,6 +13,8 @@ on:
       - 'bin/**'
       - 'scripts/**'
       - 'webroot/**'
+      - 'update.json'
+      - 'NOTICE'
       - '.github/workflows/build-and-package.yml'
   pull_request:
     paths:
@@ -25,6 +27,8 @@ on:
       - 'bin/**'
       - 'scripts/**'
       - 'webroot/**'
+      - 'update.json'
+      - 'NOTICE'
       - '.github/workflows/build-and-package.yml'
   workflow_dispatch:
     inputs:
@@ -102,7 +106,8 @@ jobs:
       - name: Normalize shell script line endings to LF
         run: |
           set -eu
-          for f in customize.sh post-fs-data.sh service.sh uninstall.sh scripts/common.sh scripts/iptables.sh scripts/watchdog.sh; do
+          for f in customize.sh post-fs-data.sh service.sh uninstall.sh \
+                   scripts/common.sh scripts/iptables.sh scripts/watchdog.sh scripts/control.sh scripts/api.cgi; do
             [ -f "$f" ] || { echo "::error::$f missing"; exit 1; }
             if grep -q $'\r' "$f"; then
               echo "Fixing CRLF -> LF: $f"
@@ -114,7 +119,8 @@ jobs:
       - name: Static syntax check
         run: |
           set -eu
-          for f in customize.sh post-fs-data.sh service.sh uninstall.sh scripts/common.sh scripts/iptables.sh scripts/watchdog.sh; do
+          for f in customize.sh post-fs-data.sh service.sh uninstall.sh \
+                   scripts/common.sh scripts/iptables.sh scripts/watchdog.sh scripts/control.sh scripts/api.cgi; do
             echo "--- syntax check: $f"
             sh -n "$f"
           done
@@ -130,7 +136,7 @@ jobs:
           rm -rf "$STAGE"
           mkdir -p "$STAGE"
 
-          cp -r module.prop customize.sh post-fs-data.sh service.sh uninstall.sh sepolicy.rule "$STAGE/"
+          cp -r module.prop customize.sh post-fs-data.sh service.sh uninstall.sh sepolicy.rule update.json NOTICE "$STAGE/"
           cp -r bin "$STAGE/bin"
           cp -r scripts "$STAGE/scripts"
           if [ -d webroot ]; then
@@ -147,10 +153,13 @@ jobs:
 
           # 打 ZIP（ZIP 顶层即模块根目录，便于 Magisk 安装器识别）
           (cd "$STAGE" && zip -r "../${ARTIFACT}" .)
+          # 另产出一个无版本号产物，供 update.json 的 releases/latest/download 稳定指向
+          cp "${ARTIFACT}" "AdGuardHomeFree-module.zip"
           rm -rf "$STAGE"
 
           # 写入 step outputs（供后续步骤使用）
           echo "artifact=${ARTIFACT}" >> "$GITHUB_OUTPUT"
+          echo "latest_artifact=AdGuardHomeFree-module.zip" >> "$GITHUB_OUTPUT"
           echo "PACKAGED ${ARTIFACT}"
           unzip -l "${ARTIFACT}"
 
@@ -161,6 +170,7 @@ jobs:
           name: AdGuardHomeFree-module
           path: |
             ${{ steps.pkg.outputs.artifact }}
+            ${{ steps.pkg.outputs.latest_artifact }}
           if-no-files-found: error
 
       # ---- 仅在 push 到主分支时创建/更新 Release ----
@@ -188,12 +198,19 @@ jobs:
             2. 通过 Magisk / KernelSU / APatch 安装
             3. 重启设备
 
+            ### 自动更新
+            - 无版本号产物 `AdGuardHomeFree-module.zip` 始终指向本 release 最新包，
+              供 `update.json`（`releases/latest/download/...`）使用。
+            - 模块管理器中已声明 `updateJson` 更新源，可直接检测新版本。
+
             ### 说明
-            - 默认 DNS 端口: 5591 (127.0.0.1)
+            - 默认 DNS 端口: 5591 (0.0.0.0 / ::)
             - 管理台: 127.0.0.1:3000
+            - 控制台 API: 127.0.0.1:5592
             - 配置目录: /data/adb/agh
           files: |
             ${{ steps.pkg.outputs.artifact }}
+            ${{ steps.pkg.outputs.latest_artifact }}
 
 
 

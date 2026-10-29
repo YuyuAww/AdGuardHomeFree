@@ -1,13 +1,44 @@
+# AdGuardHomeFree 默认配置模板
+# 首次安装时复制到 /data/adb/agh/AdGuardHome.yaml。
+# 注意：schema_version 必须 <= 所打包 AdGuard Home 二进制支持的版本，否则将迁移；
+#       建议保持与 CI 打包的最新版本一致（当前 AGH 为 schema 34）。
+schema_version: 34
+
 dns:
+  # 绑定所有接口：本机（OUTPUT 重定向 → 127.0.0.1）与热点客户端（PREROUTING → LAN IP）均可被接管。
+  # 管理台仍仅限 127.0.0.1（见 http.address）。
   bind_hosts:
-    - 127.0.0.1
+    - 0.0.0.0
+    - "::"
   port: 5591
+  # DoH 上游（加密，避免被运营商/局域网污染）
   upstream_dns:
     - https://dns.alidns.com/dns-query
     - https://doh.pub/dns-query
+  # Bootstrap：解析 DoH 主机名所用的明文 DNS
   bootstrap_dns:
     - 223.5.5.5
     - 119.29.29.29
+  # 缓存与优化
+  cache_size: 4194304
+  cache_ttl_min: 0
+  cache_ttl_max: 0
 
 http:
   address: 127.0.0.1:3000
+
+# 过滤开关与拦截行为
+filtering:
+  protection_enabled: true
+  filtering_enabled: true
+  blocking_mode: nxdomain
+
+# 广告/跟踪过滤列表
+filters:
+  - enabled: true
+    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
+    name: AdGuard DNS filter
+    id: 1
+
+# 自定义规则（追加到过滤列表之上）
+user_rules: []

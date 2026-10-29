@@ -11,7 +11,13 @@ fi
 # ---------- 运行时数据目录 ----------
 RUNTIME_DIR="/data/adb/agh"
 LOG_DIR="$RUNTIME_DIR/logs"
-mkdir -p "$LOG_DIR" 2>/dev/null
+PID_DIR="$RUNTIME_DIR/run"
+mkdir -p "$LOG_DIR" "$PID_DIR" 2>/dev/null
+
+# ---------- 默认端口（可被 bin/AdGuardHome.yaml 覆盖，见 get_dns_port） ----------
+DNS_PORT_DEFAULT=5591
+ADMIN_PORT_DEFAULT=3000
+CTRL_PORT_DEFAULT=5592
 
 # ---------- busybox 探测 ----------
 # 部分设备 busybox 不内置（仅 magisk 自带），优先使用系统 busybox，回退到 magisk 内置
@@ -27,9 +33,43 @@ detect_busybox() {
 }
 detect_busybox
 
-# ---------- 简易日志 ----------
+# ---------- 从配置读取 DNS 端口（dns.port），失败回退默认 ----------
+get_dns_port() {
+    local cfg="$1"
+    [ -n "$cfg" ] || cfg="$RUNTIME_DIR/AdGuardHome.yaml"
+    if [ -f "$cfg" ]; then
+        # dns.port 是配置中唯一形如 "  port: <num>" 的键（http 用 address，不用 port）
+        local p
+        p="$($BUSYBOX grep -E '^[[:space:]]*port:[[:space:]]*[0-9]+' "$cfg" 2>/dev/null \
+            | $BUSYBOX head -n1 \
+            | $BUSYBOX sed -E 's/.*port:[[:space:]]*([0-9]+).*/\1/')"
+        if [ -n "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    fi
+    echo "$DNS_PORT_DEFAULT"
+}
+
+# ---------- 运行时解析出的端口 ----------
+DNS_PORT="$(get_dns_port)"
+
+# ---------- 简易日志（带轮转，单文件上限 512KB） ----------
+LOG_MAX=524288
+rotate_log() {
+    local f="$1"
+    [ -f "$f" ] || return 0
+    local sz
+    sz=$($BUSYBOX wc -c < "$f" 2>/dev/null | $BUSYBOX tr -d ' ' || echo 0)
+    if [ "$sz" -gt "$LOG_MAX" ] 2>/dev/null; then
+        $BUSYBOX mv "$f" "$f.1" 2>/dev/null || true
+    fi
+}
+
 log() {
-    echo "[AGHFREE $(date '+%F %T')] $*" >> "$LOG_DIR/module.log" 2>/dev/null
+    local entry="[AGHFREE $(date '+%F %T')] $*"
+    rotate_log "$LOG_DIR/module.log"
+    echo "$entry" >> "$LOG_DIR/module.log" 2>/dev/null
 }
 
 # ---------- 模块是否处于激活状态（Magisk 模块开关） ----------
@@ -49,3 +89,24 @@ detect_env() {
     fi
 }
 detect_env
+
+# ---------- AdGuardHome 主进程管理 ----------
+AGH_BIN="$MODDIR/bin/AdGuardHome"
+
+agh_is_running() {
+    $BUSYBOX pgrep -f "$AGH_BIN" > /dev/null 2>&1
+}
+
+agh_start() {
+    local cfg="$RUNTIME_DIR/AdGuardHome.yaml"
+    [ -f "$cfg" ] || cfg="$MODDIR/bin/AdGuardHome.yaml"
+    export SSL_CERT_DIR="/system/etc/security/cacerts/"
+    nohup "$AGH_BIN" -c "$cfg" -w "$RUNTIME_DIR" \
+        >> "$LOG_DIR/agh.log" 2>&1 &
+    echo $! > "$PID_DIR/agh.pid" 2>/dev/null || true
+}
+
+agh_stop() {
+    $BUSYBOX pkill -f "$AGH_BIN" 2>/dev/null || true
+    rm -f "$PID_DIR/agh.pid" 2>/dev/null || true
+}

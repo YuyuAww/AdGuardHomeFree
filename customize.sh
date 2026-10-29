@@ -15,9 +15,9 @@ if [ ! -f "$RTDIR/AdGuardHome.yaml" ]; then
 fi
 chmod 755 "$RTDIR"
 
-# 赋予二进制与脚本执行权限（部分安装器会丢失 x 位）
+# 赋予二进制与脚本执行权限（部分安装器会丢失 x 位；api.cgi 非 .sh 后缀，单独覆盖）
 chmod 755 "$MODDIR/bin/AdGuardHome" 2>/dev/null || true
-chmod 755 "$MODDIR"/scripts/*.sh 2>/dev/null || true
+chmod 755 "$MODDIR"/scripts/* 2>/dev/null || true
 
 echo "[AGHFREE] customize.sh 完成"
 
