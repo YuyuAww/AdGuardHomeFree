@@ -92,6 +92,14 @@
       管理台地址：<span id="admin-url">127.0.0.1:3000</span>（本机回环）·
       控制台 API：<span id="ctrl-url">127.0.0.1:5592</span>
     </p>
+    <div class="row" style="margin-top:10px">
+      <span class="label">访问令牌</span>
+      <input id="token" type="password" autocomplete="off" spellcheck="false"
+        placeholder="cat /data/adb/agh/run/api.token"
+        style="flex:1;min-width:0;background:#0c0e12;border:1px solid var(--border);border-radius:8px;color:var(--text);padding:7px 10px;font-size:13px" />
+      <button class="btn ghost" id="btn-token">保存</button>
+    </div>
+    <p class="hint">启动/停止/重启需要令牌；令牌在模块启动时写入 <code>/data/adb/agh/run/api.token</code>（仅 root 可读，可用 root 终端查看）。</p>
   </section>
 
   <section class="card">
@@ -114,13 +122,25 @@
   //     通过注入的 `window.ksu` JS 桥以 root 执行模块控制脚本；
   //     注意该环境为 https，fetch("http://127.0.0.1:*") 会被当作混合内容阻止。
   //  B) 模块自带控制台服务（http://127.0.0.1:5592，busybox httpd）：同源 fetch。
-  //  C) 普通浏览器直接打开 http://127.0.0.1:5592：跨源 fetch（CGI 已带 CORS 头）。
+  //  C) 普通浏览器直接打开 http://127.0.0.1:5592：同源 fetch（API 不再输出 CORS 头，
+  //     也不允许跨源调用，避免任意网页读到模块状态或关闭全机去广告）。
   var inBridge = (typeof window.ksu !== "undefined" && typeof window.ksu.exec === "function");
   var SELF_HOST = (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "::1");
   var SELF_PORT = (location.port === "5592" || location.port === "");
   var API = (SELF_HOST && SELF_PORT) ? "./cgi-bin/api.cgi" : "http://127.0.0.1:5592/cgi-bin/api.cgi";
   // 桥接模式下调用的模块控制脚本（模块 id 固定为 adguardhomefree）
   var CTRL = "/data/adb/modules/adguardhomefree/scripts/control.sh";
+
+  // 访问令牌：控制台 API 的 start/stop/restart 需要它（见 scripts/api.cgi）。
+  // 令牌由 control.sh 在启动控制台时随机生成，仅 root 可读，用户需手动填入一次。
+  // 存在 localStorage 中，避免每次刷新都要重输；不使用 cookie（httpd 无会话支持）。
+  var TOKEN_KEY = "aghfree_api_token";
+  function getToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setToken(v) {
+    try { localStorage.setItem(TOKEN_KEY, v); } catch (e) { /* 隐私模式下忽略 */ }
+  }
 
   var els = {
     proc: document.getElementById("st-proc"),
@@ -167,9 +187,14 @@
           return JSON.parse(r.stdout || "{}");
         });
     }
-    return fetch(API + "?action=" + encodeURIComponent(action), { method: method || "GET" })
+    // fetch 路径经 busybox httpd -> api.cgi，启停动作必须带令牌 t
+    var q = "?action=" + encodeURIComponent(action);
+    var tk = getToken();
+    if (tk) { q += "&t=" + encodeURIComponent(tk); }
+    return fetch(API + q, { method: method || "GET", headers: { "Accept": "application/json" } })
       .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status);
+        if (r.status === 403) { throw new Error("访问令牌无效或已轮换"); }
+        if (!r.ok) { throw new Error("HTTP " + r.status); }
         return r.json();
       });
   }
@@ -179,9 +204,14 @@
     setBadge(els.dns,  s.dns ? "ok" : "off", "已接管", "未接管");
     els.web.textContent = s.web ? "可用" : "不可用";
     els.ver.textContent = s.version || "未知";
-    els.log.textContent = s.log || "(无日志)";
+    // 未设置令牌时后端只返回状态、不返回日志内容（避免本机任意 App 读到域名历史）
+    els.log.textContent = s.log || (s.log_locked ? "(设置访问令牌后显示)" : "(无日志)");
     els.ctrlUrl.textContent = "127.0.0.1:" + (s.ctrl_port || "5592");
     els.consoleLink.textContent = "http://127.0.0.1:" + (s.ctrl_port || "5592");
+    // 管理台端口来自配置的 http.address，不再写死 3000
+    var ap = s.admin_port || "3000";
+    els.admin.href = "http://127.0.0.1:" + ap;
+    els.adminUrl.textContent = "127.0.0.1:" + ap;
     clearNotice();
   }
 
@@ -206,17 +236,36 @@
   }
 
   function act(action) {
+    // 启动/停止/重启在 fetch 路径上需要令牌；未填写时直接提示，
+    // 避免发出注定 403 的请求后只看到一句含糊的失败。
+    if (!inBridge && !getToken()) {
+      showNotice("请先在上方「访问令牌」中填入 <code>/data/adb/agh/run/api.token</code> 的内容" +
+                 "（仅 root 可读，可用 root 终端 <code>cat</code> 查看），再执行操作。");
+      return Promise.resolve();
+    }
     return api(action, "POST")
       .then(function () { return refresh(); })
       .catch(function (e) { fallback(e); });
+  }
+
+  // ---- 访问令牌交互 ----
+  var tokenInput = document.getElementById("token");
+  var btnToken = document.getElementById("btn-token");
+  if (btnToken && tokenInput) {
+    btnToken.addEventListener("click", function () {
+      setToken((tokenInput.value || "").trim());
+      refresh();
+    });
+    tokenInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { setToken((tokenInput.value || "").trim()); refresh(); }
+    });
+    tokenInput.value = getToken();
   }
 
   document.getElementById("btn-refresh").addEventListener("click", refresh);
   document.getElementById("btn-start").addEventListener("click", function () { act("start"); });
   document.getElementById("btn-stop").addEventListener("click", function () { act("stop"); });
   document.getElementById("btn-restart").addEventListener("click", function () { act("restart"); });
-  els.admin.href = "http://127.0.0.1:3000";
-  els.adminUrl.textContent = "127.0.0.1:3000";
 
   // 页面若由模块控制台服务提供，则显示控制台标识，便于区分
   if (SELF_HOST && SELF_PORT) {

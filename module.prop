@@ -1,8 +1,10 @@
 id=adguardhomefree
 name=AdGuardHomeFree
-version=v1.1.0
-versionCode=11000
+version=v1.2.0
+versionCode=12000
 author=YuyuAww
 description=System-wide DNS filtering with AdGuardHome for Magisk/KernelSU/APatch
-# Magisk 模块管理器自动更新源（raw GitHub 上的 update.json；updateJson 为规范字段）
-updateJson=https://raw.githubusercontent.com/YuyuAww/AdGuardHomeFree/main/update.json
+# 自动更新源：指向最新 release 里的 update.json 资产，而不是 main 分支上的静态文件。
+# 若指向 main，versionCode 会一直停在仓库里的值，模块管理器永远认为「已是最新」，
+# 自动更新实际永不触发。CI 每次发布都会生成与资产同源的 update.json。
+updateJson=https://github.com/YuyuAww/AdGuardHomeFree/releases/latest/download/update.json

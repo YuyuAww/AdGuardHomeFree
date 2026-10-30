@@ -19,6 +19,10 @@ dns:
   bootstrap_dns:
     - 223.5.5.5
     - 119.29.29.29
+  # 拦截行为：nxdomain 返回 NXDOMAIN，对客户端兼容性最好、响应也最快。
+  # 注意：blocking_mode 属于 dns 段（AGH 的 dnsConfig），写在 filtering: 下会被
+  # yaml.Unmarshal 静默忽略（AGH 非 strict 解析），最终静默使用默认值。
+  blocking_mode: nxdomain
   # 缓存与优化
   cache_size: 4194304
   cache_ttl_min: 0
@@ -27,11 +31,10 @@ dns:
 http:
   address: 127.0.0.1:3000
 
-# 过滤开关与拦截行为
+# 过滤开关。filters / user_rules 是顶层键（与 filtering 同级），不能缩进到 filtering 内。
 filtering:
   protection_enabled: true
   filtering_enabled: true
-  blocking_mode: nxdomain
 
 # 广告/跟踪过滤列表
 filters:

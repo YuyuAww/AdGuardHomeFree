@@ -21,15 +21,31 @@ CTRL_PORT_DEFAULT=5592
 
 # ---------- busybox 探测 ----------
 # 部分设备 busybox 不内置（仅 magisk 自带），优先使用系统 busybox，回退到 magisk 内置
+# 结果：BUSYBOX 为 busybox 可执行文件路径；找不到时为空字符串。
+# 空字符串是安全的：所有调用点写作 `$BUSYBOX grep`（不加引号），展开后等价于
+# `grep`，会走 PATH（Android 上即 toybox 提供的同名命令）。
+# 唯一例外是 `"$BUSYBOX" httpd`：busybox 缺失时没有 httpd，需用 HAVE_BUSYBOX 判断。
+HAVE_BUSYBOX=0
 detect_busybox() {
-    if [ -x "/system/bin/busybox" ]; then
-        BUSYBOX="/system/bin/busybox"
-    elif [ -n "$MAGISK_DIR" ] && [ -x "$MAGISK_DIR/bin/busybox" ]; then
-        BUSYBOX="$MAGISK_DIR/bin/busybox"
-    else
-        # 最后兜底：直接调用命令
-        BUSYBOX="command"
+    local c
+    for c in /data/adb/magisk/busybox /system/bin/busybox /system/xbin/busybox; do
+        if [ -x "$c" ]; then
+            BUSYBOX="$c"
+            HAVE_BUSYBOX=1
+            return 0
+        fi
+    done
+    # Magisk 的 busybox 位于 magisk --path 指向的 tmpfs 目录（/sbin 或 /debug_ramdisk）
+    if command -v magisk > /dev/null 2>&1; then
+        c="$(magisk --path 2>/dev/null)"
+        if [ -n "$c" ] && [ -x "$c/busybox" ]; then
+            BUSYBOX="$c/busybox"
+            HAVE_BUSYBOX=1
+            return 0
+        fi
     fi
+    BUSYBOX=""
+    HAVE_BUSYBOX=0
 }
 detect_busybox
 
@@ -51,8 +67,25 @@ get_dns_port() {
     echo "$DNS_PORT_DEFAULT"
 }
 
+# ---------- 从配置读取管理台端口（http.address 形如 127.0.0.1:3000） ----------
+get_admin_port() {
+    local cfg="$1"
+    [ -n "$cfg" ] || cfg="$RUNTIME_DIR/AdGuardHome.yaml"
+    if [ -f "$cfg" ]; then
+        local p
+        # 只匹配 http.address 的尾部端口；dns.port 是独立键，不会被这条正则命中
+        p="$($BUSYBOX sed -n 's/^[[:space:]]*address:[[:space:]]*.*:\([0-9][0-9]*\)[[:space:]]*$/\1/p' "$cfg" 2>/dev/null | $BUSYBOX head -n1)"
+        if [ -n "$p" ]; then
+            echo "$p"
+            return 0
+        fi
+    fi
+    echo "$ADMIN_PORT_DEFAULT"
+}
+
 # ---------- 运行时解析出的端口 ----------
 DNS_PORT="$(get_dns_port)"
+ADMIN_PORT="$(get_admin_port)"
 
 # ---------- 简易日志（带轮转，单文件上限 512KB） ----------
 LOG_MAX=524288
@@ -74,8 +107,9 @@ log() {
 
 # ---------- 模块是否处于激活状态（Magisk 模块开关） ----------
 is_enabled() {
-    # /data/adb/modules/AdGuardHomeFree/.disable 存在则禁用
-    [ ! -f "$MODDIR/.disable" ]
+    # Magisk / KernelSU / APatch 的禁用标记是 disable（无点号），remove 表示待卸载。
+    # 任一存在即视为不应启动。
+    [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ]
 }
 
 # ---------- 是否 root 模块环境（KernelSU / APatch / Magisk） ----------

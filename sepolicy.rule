@@ -1,37 +1,29 @@
-# sepolicy.rule - AdGuardHomeFree 的 SELinux 策略
-# 兼容 KernelSU / APatch（原生支持 sepolicy.rule 格式）。
-# Magisk 用户可忽略本文件（其通过 magiskpolicy/sepolicy.d 兜底）。
+# sepolicy.rule - AdGuardHomeFree 的 SELinux 补充策略
 #
-# 策略设计原则（保守）：
-# 1. 不为 AdGuardHome 二进制单独立域（避免各 Android 版本 policy 差异导致不可用）；
-#    进程随执行者 context 运行（通常是 shell / magisk / su 域，已具备所需能力）。
-# 2. 只补充文件标签 + 少量 socket 权限，降低对系统 SELinux 的侵入。
+# 语法要求：本文件每一行都会交给 magiskpolicy --live / KernelSU、APatch 的策略
+# 加载器解析，因此必须是合法的策略语句（allow / type / permissive ...）或注释。
 #
-# 说明：若某设备策略未定义 `magisk` 域，本文件会被忽略或仅部分生效；
-#       Magisk / KernelSU / APatch 的模块脚本实际运行在 magisk 域（具备网络权限）。
-
-# ---------- 文件标签：让 /data/adb/agh 下运行时文件具备 system_data_file 标签 ----------
-file /data/adb/agh u:object_r:system_data_file:s0
-file /data/adb/agh/logs u:object_r:system_data_file:s0
-file /data/adb/agh/run u:object_r:system_data_file:s0
-
-# ---------- 让执行 shell / magisk / su 域能读写该目录（AdGuardHome 继承其 context） ----------
-allow shell system_data_file { file open read write create getattr unlink rename }
-allow shell system_data_file { dir open read write add_name create search }
-allow magisk system_data_file { file open read write create getattr }
-allow magisk system_data_file { dir open read write add_name create search }
-allow su system_data_file { file open read write create getattr }
-allow su system_data_file { dir open read write add_name create search }
-
-# ---------- DNS 端口监听与连接（127.0.0.1:5591 / 0.0.0.0:5591）：允许相关域创建、
-#            绑定（bind/node_bind）、读写与连接回环/任意地址。绑定 0.0.0.0 需要 node_bind，
-#            否则 AdGuardHome 无法在非回环接口上监听（热点客户端接管需要）。 ----------
-allow shell unlabelled { tcp_socket create read write connectto bind }
-allow magisk unlabelled { tcp_socket create read write connectto bind }
-allow su unlabelled { tcp_socket create read write connectto bind }
-allow shell node { node_bind }
-allow magisk node { node_bind }
-allow su node { node_bind }
-allow shell loopback_node { node_bind }
-allow magisk loopback_node { node_bind }
-allow su loopback_node { node_bind }
+# 旧版本曾包含：
+#     file /data/adb/agh u:object_r:system_data_file:s0
+# 这类 `file_contexts` 风格的语句并不是策略语句，会让整份规则解析失败
+# （Magisk 报 Invalid policy statement 后整体丢弃，KernelSU 静默跳过），
+# 属于「看起来生效、实际一条都没加载」的隐蔽故障，现已移除。
+#
+# ---------------------------------------------------------------------------
+# 为什么当前不需要任何 allow 语句
+# ---------------------------------------------------------------------------
+# 1. 模块脚本与 AdGuardHome 进程均由 root 启动，运行在 Magisk 的 `magisk` 域
+#    （官方文档明确其为 unconstrained / permissive 域）或 KernelSU / APatch 的
+#    `su` 域，本身即具备 bind 任意端口、读写 /data/adb 下文件的能力。
+# 2. /data/adb 的标签是 `adb_data_file`，上述域对其拥有完整访问权限；运行时
+#    目录 /data/adb/agh 继承该标签，无需额外打标签，也无需为它定义新类型。
+#
+# 本文件刻意保持为空策略：宁可少授权，也不让一条语法错误导致整份策略被丢弃。
+#
+# ---------------------------------------------------------------------------
+# 以后如需扩展（例如把 AdGuardHome 放进独立 domain，或设备上 shell 域被收紧）
+# ---------------------------------------------------------------------------
+# 只追加合法语句，且每一条都要在目标设备上实测：
+#     allow magisk system_data_file file { open read write create getattr }
+#     allow magisk node node { node_bind }
+#     allow shell  node tcp_socket { create read write connectto bind }

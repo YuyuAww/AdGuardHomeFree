@@ -27,29 +27,36 @@ json_escape() {
 # ---------- 状态采集 ----------
 status_json() {
     local proc="false" dns="false" web="false"
-    local logtext="" ver=""
+    local logtext="" ver="" loglocked="false"
 
     agh_is_running && proc="true"
 
-    # DNS 接管判定：OUTPUT 链上存在 AGHFREE 链
+    # DNS 接管判定：IPv4 或 IPv6 的 OUTPUT 链上存在 AGHFREE 跳转即视为已接管
     if $BUSYBOX iptables -t nat -C OUTPUT -j AGHFREE 2>/dev/null; then
+        dns="true"
+    elif $BUSYBOX ip6tables -t nat -C OUTPUT -j AGHFREE 2>/dev/null; then
         dns="true"
     fi
 
-    # 管理台可达性：ADMIN_PORT 有监听
-    if $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$ADMIN_PORT_DEFAULT"; then
+    # 管理台可达性：使用配置里的实际端口（http.address），不再写死 3000
+    if $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$ADMIN_PORT"; then
         web="true"
     fi
 
-    # 版本：优先 build-info.txt
+    # 版本：优先 build-info.txt。grep 不加 ^ 锚点，兼容历史上被写入 UTF-8 BOM 的文件。
     if [ -f "$MODDIR/build-info.txt" ]; then
-        ver="$($BUSYBOX grep '^agh_version=' "$MODDIR/build-info.txt" | $BUSYBOX head -n1 | $BUSYBOX sed 's/^agh_version=//')"
+        ver="$($BUSYBOX grep 'agh_version=' "$MODDIR/build-info.txt" 2>/dev/null | $BUSYBOX head -n1 | $BUSYBOX sed 's/.*agh_version=//')"
     fi
-    [ -n "$ver" ] || ver="$($BUSYBOX grep '^version=' "$MODDIR/module.prop" 2>/dev/null | $BUSYBOX head -n1 | $BUSYBOX sed 's/^version=//')"
+    [ -n "$ver" ] || ver="$($BUSYBOX grep 'version=' "$MODDIR/module.prop" 2>/dev/null | $BUSYBOX head -n1 | $BUSYBOX sed 's/.*version=//')"
 
-    # 最近日志（module.log 尾部）
+    # 日志门控：只有通过令牌校验的请求（api.cgi 传 AGHFREE_LOG=1）才返回内容，
+    # 否则本机任意 App 探测 127.0.0.1:5592 就能读到用户的域名访问记录。
     if [ -f "$LOG_DIR/module.log" ]; then
-        logtext="$($BUSYBOX tail -n 30 "$LOG_DIR/module.log" 2>/dev/null)"
+        if [ "${AGHFREE_LOG:-0}" = "1" ]; then
+            logtext="$($BUSYBOX tail -n 30 "$LOG_DIR/module.log" 2>/dev/null)"
+        else
+            loglocked="true"
+        fi
     fi
 
     echo "{"
@@ -58,21 +65,39 @@ status_json() {
     echo "  \"dns\":$dns,"
     echo "  \"web\":$web,"
     echo "  \"dns_port\":$(json_escape "$DNS_PORT"),"
-    echo "  \"admin_port\":$(json_escape "$ADMIN_PORT_DEFAULT"),"
+    echo "  \"admin_port\":$(json_escape "$ADMIN_PORT"),"
     echo "  \"ctrl_port\":$(json_escape "$CTRL_PORT_DEFAULT"),"
     echo "  \"version\":\"$(json_escape "$ver")\","
+    echo "  \"log_locked\":$loglocked,"
     echo "  \"log\":\"$(json_escape "$logtext")\""
     echo "}"
 }
 
 # ---------- 动作实现 ----------
+port_listening() {
+    $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$DNS_PORT"
+}
+
+# 有界等待 DNS 端口就绪：AGH 首次加载过滤列表通常需要数秒，固定 sleep 1 不可靠
+wait_port() {
+    local n="${1:-15}" i=0
+    while [ $i -lt "$n" ]; do
+        port_listening && return 0
+        sleep 1
+        i=$((i+1))
+    done
+    port_listening
+}
+
 do_start() {
     agh_start
-    sleep 1
-    if $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$DNS_PORT"; then
+    wait_port 15
+    if port_listening; then
         sh "$MODDIR/scripts/iptables.sh" apply
+        echo "{\"ok\":true,\"action\":\"start\",\"dns\":true}"
+    else
+        echo "{\"ok\":true,\"action\":\"start\",\"dns\":false}"
     fi
-    echo "{\"ok\":true,\"action\":\"start\"}"
 }
 
 do_stop() {
@@ -86,18 +111,47 @@ do_restart() {
     agh_stop
     sleep 1
     agh_start
-    sleep 1
-    if $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$DNS_PORT"; then
+    wait_port 20
+    if port_listening; then
         sh "$MODDIR/scripts/iptables.sh" apply
+        echo "{\"ok\":true,\"action\":\"restart\",\"dns\":true}"
+    else
+        echo "{\"ok\":true,\"action\":\"restart\",\"dns\":false}"
     fi
-    echo "{\"ok\":true,\"action\":\"restart\"}"
 }
 
 # ---------- 控制台服务（busybox httpd + CGI） ----------
+# 生成访问令牌：start/stop/restart 必须携带它（见 scripts/api.cgi）。
+# 只有 root 能读 /data/adb/agh/run/api.token（chmod 600），因此本机普通 App
+# 无法再通过 127.0.0.1:5592 关闭全机去广告。
+gen_token() {
+    local raw
+    raw="$($BUSYBOX cat /proc/sys/kernel/random/uuid 2>/dev/null || true)"
+    [ -n "$raw" ] || raw="$(date +%s)-$$-${RANDOM:-0}"
+    printf '%s' "$raw" | $BUSYBOX tr -cd '0-9a-zA-Z' | $BUSYBOX cut -c1-32
+}
+
 start_server() {
+    if [ "${HAVE_BUSYBOX:-0}" != "1" ]; then
+        log "控制台服务未启动：未找到 busybox（缺少 httpd），WebUI 请使用模块管理器桥接模式"
+        return 0
+    fi
+
     # 运行时 WebUI 根：避免写入只读模块目录，也便于清理
     WEB_ROOT="$RUNTIME_DIR/webui"
     mkdir -p "$WEB_ROOT/cgi-bin"
+
+    # 令牌只在首次生成，之后跨重启复用：
+    #   轮换虽更严格，但会让用户每次开机都要重新查看 api.token，实际体验不可用。
+    #   文件权限 600 + 位于 /data/adb（0700，adb_data_file 标签）之下，非 root 进程无法读取。
+    TOKEN_FILE="$PID_DIR/api.token"
+    if [ ! -s "$TOKEN_FILE" ]; then
+        TOKEN="$(gen_token)"
+        if [ -n "$TOKEN" ]; then
+            (umask 077; printf '%s' "$TOKEN" > "$TOKEN_FILE") 2>/dev/null || true
+        fi
+    fi
+    chmod 600 "$TOKEN_FILE" 2>/dev/null || true
 
     # 页面与 CGI 复制到运行时目录（幂等）
     cp -f "$MODDIR/webroot/index.html" "$WEB_ROOT/index.html" 2>/dev/null || true

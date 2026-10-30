@@ -113,7 +113,10 @@ $Required = @(
     'bin/AdGuardHome.yaml',
     'scripts/common.sh',
     'scripts/iptables.sh',
-    'scripts/watchdog.sh'
+    'scripts/watchdog.sh',
+    'scripts/control.sh',
+    'scripts/api.cgi',
+    'webroot/index.html'
 )
 
 $Missing = @()
@@ -207,7 +210,12 @@ try {
     $Commit = 'local'
 }
 $BuildInfo = @('module_id=adguardhomefree', "agh_version=$AghVersion", "build_time=$BuildTime", "commit=$Commit")
-$BuildInfo | Set-Content -LiteralPath (Join-Path $Stage 'build-info.txt') -Encoding utf8
+# 必须写成「无 BOM 的 UTF-8」：PowerShell 5.1 的 Set-Content -Encoding utf8 会写入
+# BOM(EF BB BF)，Android 端 grep '^agh_version=' 首行匹配失败，模块 WebUI 版本显示
+# 会退化成 module.prop 的值。UTF8Encoding($false) 在 5.1 / 7.x 下行为一致。
+$BuildInfoPath = Join-Path $Stage 'build-info.txt'
+$Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($BuildInfoPath, (($BuildInfo -join "`n") + "`n"), $Utf8NoBom)
 
 Write-Step "Creating ZIP"
 if (Test-Path -LiteralPath $Artifact) {

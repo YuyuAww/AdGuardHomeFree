@@ -151,6 +151,23 @@ jobs:
             echo "repository=${GITHUB_REPOSITORY}"
           } > "$STAGE/build-info.txt"
 
+          # ---- 生成随 release 分发的 update.json ----
+          # 旧版 updateJson 指向 main 分支的静态文件，versionCode 永不变化，
+          # 模块管理器始终判定「已是最新」，自动更新形同虚设。
+          MOD_VERSION="$(sed -n 's/^version=//p' module.prop | head -n1)"
+          MOD_CODE="$(sed -n 's/^versionCode=//p' module.prop | head -n1)"
+          [ -n "$MOD_VERSION" ] || { echo "::error::module.prop 缺少 version"; exit 1; }
+          [ -n "$MOD_CODE" ] || { echo "::error::module.prop 缺少 versionCode"; exit 1; }
+          {
+            echo "{"
+            echo "  \"version\": \"${MOD_VERSION}\","
+            echo "  \"versionCode\": ${MOD_CODE},"
+            echo "  \"zipUrl\": \"https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/AdGuardHomeFree-module.zip\","
+            echo "  \"changelog\": \"https://github.com/${GITHUB_REPOSITORY}/releases/latest\""
+            echo "}"
+          } > "$STAGE/update.json"
+          echo "MODULE ${MOD_VERSION} (${MOD_CODE})"
+
           # 打 ZIP（ZIP 顶层即模块根目录，便于 Magisk 安装器识别）
           (cd "$STAGE" && zip -r "../${ARTIFACT}" .)
           # 另产出一个无版本号产物，供 update.json 的 releases/latest/download 稳定指向

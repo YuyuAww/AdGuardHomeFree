@@ -24,9 +24,17 @@ has_ip6tables() {
 }
 
 clear_family() {
-    local run="$1"
-    $run -t nat -D OUTPUT -j $CHAIN 2>/dev/null
-    $run -t nat -D PREROUTING -j $CHAIN 2>/dev/null
+    local run="$1" i=0
+    # 反复摘除跳转，避免历史版本重复挂载后残留
+    while [ $i -lt 8 ]; do
+        $run -t nat -D OUTPUT -j $CHAIN 2>/dev/null || break
+        i=$((i+1))
+    done
+    i=0
+    while [ $i -lt 8 ]; do
+        $run -t nat -D PREROUTING -j $CHAIN 2>/dev/null || break
+        i=$((i+1))
+    done
     $run -t nat -F $CHAIN 2>/dev/null
     $run -t nat -X $CHAIN 2>/dev/null
 }
@@ -39,10 +47,16 @@ apply_family() {
 
     $run -t nat -N $CHAIN 2>/dev/null || true
 
-    # 豁免回环地址与 AdGuardHome 自身进程（uid 0）的报文，
-    # 避免 AdGuardHome 的 bootstrap/上游查询被再次重定向形成环路。
-    $run -t nat -A $CHAIN -d 127.0.0.1 -j RETURN 2>/dev/null
-    $run -t nat -A $CHAIN -d ::1 -j RETURN 2>/dev/null
+    # 豁免回环/链路本地网段与 AdGuardHome 自身进程（uid 0）的报文，
+    # 避免 bootstrap/上游查询被再次重定向形成环路。按协议族下发各自地址，
+    # 否则 ip6tables 会因无法解析 IPv4 字面量而整条失败。
+    if [ "$run" = "ipt4" ]; then
+        $run -t nat -A $CHAIN -d 127.0.0.0/8 -j RETURN 2>/dev/null
+        $run -t nat -A $CHAIN -d 169.254.0.0/16 -j RETURN 2>/dev/null
+    else
+        $run -t nat -A $CHAIN -d ::1 -j RETURN 2>/dev/null
+        $run -t nat -A $CHAIN -d fe80::/10 -j RETURN 2>/dev/null
+    fi
     $run -t nat -A $CHAIN -m owner --uid-owner 0 -j RETURN 2>/dev/null || true
 
     # 将 TCP/UDP 53 重定向到 AdGuardHome

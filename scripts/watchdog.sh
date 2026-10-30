@@ -7,6 +7,19 @@ MODDIR="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="$RUNTIME_DIR/AdGuardHome.yaml"
 [ -f "$CFG" ] || CFG="$MODDIR/bin/AdGuardHome.yaml"
 
+# ---------- 单实例锁 ----------
+# service.sh、uninstall.sh 与手动调用可能叠加多个看门狗，先做互斥。
+LOCK="$PID_DIR/watchdog.lock"
+if [ -f "$LOCK" ]; then
+    OLD_PID=$($BUSYBOX cat "$LOCK" 2>/dev/null || echo "")
+    if [ -n "$OLD_PID" ] && $BUSYBOX kill -0 "$OLD_PID" 2>/dev/null; then
+        log "watchdog: 已有实例运行 (pid=$OLD_PID)，本次退出"
+        exit 0
+    fi
+fi
+echo $$ > "$LOCK" 2>/dev/null || true
+trap 'rm -f "$LOCK"' EXIT INT TERM HUP
+
 MAX_RESTARTS=10   # 重启窗口内最多重启次数
 WINDOW=600        # 重启计数窗口（秒）
 CHECK_INTERVAL=20
@@ -56,6 +69,14 @@ while true; do
             log "watchdog: 已重新接管 DNS (port $DNS_PORT)"
         else
             log "watchdog: 重启后端口未就绪，本次不接管"
+        fi
+    else
+        # 进程存活但接管规则可能被其他模块/系统清掉，周期性校验并补接管
+        if ! $BUSYBOX iptables -t nat -C OUTPUT -j AGHFREE 2>/dev/null; then
+            if port_ready; then
+                sh "$MODDIR/scripts/iptables.sh" apply
+                log "watchdog: 检测到 DNS 接管缺失，已重新应用"
+            fi
         fi
     fi
 done

@@ -6,9 +6,11 @@ MODDIR="$(cd "$(dirname "$0")" && pwd)"
 . "$MODDIR/scripts/common.sh"
 
 # 停止看门狗、控制台服务与 AdGuardHome 进程
-$BUSYBOX pkill -f "adguardhomefree/watchdog.sh" 2>/dev/null || true
-$BUSYBOX pkill -f "adguardhomefree/control.sh" 2>/dev/null || true
+# 按 $MODDIR 精确匹配（旧版硬编码 adguardhomefree/，模块目录改名后清理不掉）
+$BUSYBOX pkill -f "$MODDIR/scripts/watchdog.sh" 2>/dev/null || true
+$BUSYBOX pkill -f "$MODDIR/scripts/control.sh" 2>/dev/null || true
 $BUSYBOX pkill -f "httpd.*127.0.0.1:$CTRL_PORT_DEFAULT" 2>/dev/null || true
+rm -f "$PID_DIR/watchdog.lock" 2>/dev/null || true
 agh_stop
 sleep 1
 

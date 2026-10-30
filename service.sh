@@ -13,7 +13,7 @@ fi
 
 # 模块被禁用则直接退出
 if ! is_enabled; then
-    log "模块已被 .disable 标记，跳过启动"
+    log "模块已被 disable/remove 标记，跳过启动"
     exit 0
 fi
 
@@ -28,12 +28,13 @@ while [ $i -lt 30 ]; do
 done
 
 # 清理旧实例（先停看门狗，再停主进程，避免看门狗立刻重启主进程）
-$BUSYBOX pkill -f "adguardhomefree/watchdog.sh" 2>/dev/null || true
+# 按 $MODDIR 精确匹配，避免模块目录改名后匹配失败导致看门狗叠加
+$BUSYBOX pkill -f "$MODDIR/scripts/watchdog.sh" 2>/dev/null || true
 agh_stop
 sleep 1
 
 # 启动 AdGuardHome（工作目录用运行时目录，避免在只读模块目录写数据）
-log "启动 AdGuardHome (cfg=$CFG, dns_port=$DNS_PORT)"
+log "启动 AdGuardHome (cfg=$CFG, dns_port=$DNS_PORT, admin_port=$ADMIN_PORT)"
 agh_start
 
 # 等待 DNS 端口就绪（有界，最多 15 秒）
