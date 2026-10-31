@@ -1,7 +1,7 @@
 id=adguardhomefree
 name=AdGuardHomeFree
-version=v1.2.0
-versionCode=12000
+version=v1.2.1
+versionCode=12001
 author=YuyuAww
 description=System-wide DNS filtering with AdGuardHome for Magisk/KernelSU/APatch
 # 自动更新源：指向最新 release 里的 update.json 资产，而不是 main 分支上的静态文件。

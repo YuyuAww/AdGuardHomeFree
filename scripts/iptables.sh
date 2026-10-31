@@ -57,7 +57,16 @@ apply_family() {
         $run -t nat -A $CHAIN -d ::1 -j RETURN 2>/dev/null
         $run -t nat -A $CHAIN -d fe80::/10 -j RETURN 2>/dev/null
     fi
-    $run -t nat -A $CHAIN -m owner --uid-owner 0 -j RETURN 2>/dev/null || true
+    # 豁免 root(uid 0) 的出站报文：AdGuardHome 自身以 root 运行，它访问
+    # bootstrap_dns（223.5.5.5:53）时若被重定向回自己，会形成 DNS 环路 → 全机断网。
+    # 旧版写作 `... || true`，内核缺 xt_owner 时规则根本没加上却静默继续，
+    # 环路风险真实存在。这里改为必须回查成功：失败就清掉半成品并放弃接管
+    # （宁可不去广告，也不要断网）。
+    if ! $run -t nat -A $CHAIN -m owner --uid-owner 0 -j RETURN 2>/dev/null; then
+        log "iptables: 无法添加 uid0 豁免（内核可能缺少 xt_owner），放弃接管以避免 DNS 环路"
+        clear_family "$run"
+        return 1
+    fi
 
     # 将 TCP/UDP 53 重定向到 AdGuardHome
     $run -t nat -A $CHAIN -p udp --dport 53 -j REDIRECT --to-ports "$REDIR_PORT" 2>/dev/null
@@ -70,7 +79,15 @@ apply_family() {
 
 apply_rules() {
     if has_iptables; then
-        apply_family ipt4
+        # apply_family 返回非 0 表示 uid0 豁免加不上（内核缺 xt_owner）。
+        # 此时必须整体放弃：若继续往下挂 IPv6 规则，就变成「v4 不接管、v6 接管」
+        # 的半接管状态，AdGuardHome 的 bootstrap 查询在 v6 侧仍会被重定向回自己，
+        # 环路风险并未消除，反而更难排查。clear_rules 顺带清掉历史残留规则。
+        if ! apply_family ipt4; then
+            log "iptables: IPv4 接管失败，已回滚并跳过 IPv6，保持 DNS 直连"
+            clear_rules
+            return 1
+        fi
     else
         log "iptables 不可用，跳过 IPv4 DNS 接管"
     fi

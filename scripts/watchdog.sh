@@ -23,6 +23,7 @@ trap 'rm -f "$LOCK"' EXIT INT TERM HUP
 MAX_RESTARTS=10   # 重启窗口内最多重启次数
 WINDOW=600        # 重启计数窗口（秒）
 CHECK_INTERVAL=20
+COOLDOWN=1800     # 重启超限后的退避时长（秒）
 
 COUNT=0
 START_TS=$(date +%s)
@@ -32,8 +33,18 @@ port_ready() {
     $BUSYBOX netstat -tln 2>/dev/null | $BUSYBOX grep -q ":$DNS_PORT"
 }
 
+# 看门狗自己的日志同样需要上限，否则异常重启循环里它会无限增长
+rotate_log "$LOG_DIR/watchdog.log"
+
 while true; do
     sleep $CHECK_INTERVAL
+
+    # 模块在管理器里被禁用 / 标记卸载后，不要继续把 AdGuardHome 拉起来。
+    # 旧版没有这个判断：用户禁用模块后看门狗仍在后台反复启动主进程。
+    if ! is_enabled; then
+        log "watchdog: 模块已禁用或标记卸载，看门狗退出"
+        exit 0
+    fi
 
     if ! agh_is_running; then
         NOW=$(date +%s)
@@ -45,9 +56,16 @@ while true; do
         COUNT=$((COUNT + 1))
 
         if [ $COUNT -gt $MAX_RESTARTS ]; then
-            log "watchdog: AdGuardHome 重启超限 (${COUNT}/${MAX_RESTARTS})，停止守护并清除 DNS 接管"
+            # 旧版这里直接 exit 1：看门狗自己退出，而没有任何东西会再拉起它，
+            # 之后 AGH 挂了就永久挂了，用户只能重启设备。
+            # 改为「清掉接管规则 + 长时间退避」：放弃高频重启（避免拖慢开机、
+            # 反复刷日志），但保留周期性重试，设备自愈后能自动回到工作状态。
+            log "watchdog: AdGuardHome 重启超限 (${COUNT}/${MAX_RESTARTS})，清除 DNS 接管并退避 ${COOLDOWN}s"
             sh "$MODDIR/scripts/iptables.sh" clear
-            exit 1
+            sleep $COOLDOWN
+            COUNT=0
+            START_TS=$(date +%s)
+            continue
         fi
 
         log "watchdog: 检测到 AdGuardHome 退出，第 ${COUNT} 次重启"

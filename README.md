@@ -69,7 +69,7 @@ AdGuardHomeFree/
 
 ## 本地构建
 
-需要 PowerShell 7+ 与 `tar`（Windows 10 1803+ 自带）。有两种方式：
+需要 PowerShell 5.1 或 7+ 与 `tar`（Windows 10 1803+ 自带）。有两种方式：
 
 **方式一：自动下载二进制并打包**
 
@@ -115,8 +115,12 @@ AdGuardHomeFree/
   https，`fetch("http://127.0.0.1:*")` 会被当作混合内容阻止，因此**不要**用 fetch
   调本地服务。Magisk 无内置 WebUI；作为兜底，模块自带 `busybox httpd` 控制台
   服务（`http://127.0.0.1:5592`），可在任意浏览器打开使用完整控制台。
-- **自动更新**：`module.prop` 声明了 `update` 指向仓库 `update.json`，模块管理器
-  可检测新版本；发布时把 `AdGuardHomeFree-module.zip`（无版本号）与带版本号 ZIP
+- **自动更新**：`module.prop` 用的是 `updateJson=`（不是 `update`），指向
+  `https://github.com/YuyuAww/AdGuardHomeFree/releases/latest/download/update.json`
+  —— 最新 Release 的资产，**不是**仓库里的静态文件（仓库那份只是模板，CI 每次
+  发布会用 `module.prop` 的 version/versionCode 重新生成同源副本；若指向 main，
+  versionCode 永不变化，模块管理器会一直判定「已是最新」）。模块管理器可据它检测
+  新版本；发布时把 `AdGuardHomeFree-module.zip`（无版本号）与带版本号 ZIP
   一并作为 Release 资产，`releases/latest/download/AdGuardHomeFree-module.zip`
   即最新包。
 
@@ -129,7 +133,13 @@ AdGuardHomeFree/
   关闭应用 IPv6）。
 
 **修改配置后如何生效？**
-- 调用控制台 API `POST http://127.0.0.1:5592/api/restart`，或重启模块/设备。
+- 用 root 终端直接重启模块进程：
+  `sh /data/adb/modules/adguardhomefree/scripts/control.sh restart`
+- 或打开控制台 `http://127.0.0.1:5592`，填入访问令牌后点「重启」。
+- 注意：模块**没有** `/api/restart` 这类 REST 路由（旧文档写错了，按它操作必然 404）。
+  控制台只有一个入口：`/cgi-bin/api.cgi?action=status|start|stop|restart`，
+  其中 `start/stop/restart` 需要令牌（`/data/adb/agh/run/api.token`，仅 root 可读），
+  可用 `X-Auth-Token` 请求头或 `&t=<token>` 参数传入。
 
 **如何完全卸载？**
 - 在模块管理器中移除；`uninstall.sh` 会停止进程、清除 iptables 规则并删除

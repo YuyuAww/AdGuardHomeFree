@@ -128,8 +128,24 @@
   var SELF_HOST = (location.hostname === "127.0.0.1" || location.hostname === "localhost" || location.hostname === "::1");
   var SELF_PORT = (location.port === "5592" || location.port === "");
   var API = (SELF_HOST && SELF_PORT) ? "./cgi-bin/api.cgi" : "http://127.0.0.1:5592/cgi-bin/api.cgi";
-  // 桥接模式下调用的模块控制脚本（模块 id 固定为 adguardhomefree）
-  var CTRL = "/data/adb/modules/adguardhomefree/scripts/control.sh";
+  // 桥接模式下调用的模块控制脚本（模块 id 固定为 adguardhomefree）。
+  // 模块可能位于 /data/adb/modules（已启用）或 /data/adb/modules_update（刚装完、待重启），
+  // 目录也可能被用户改名。旧版硬编码单一路径，命中不了就整个 WebUI 的启停按钮失效
+  // （页面能加载、状态一直「未知」）。这里按顺序探测，与 scripts/api.cgi 的兜底保持一致。
+  var CTRL_PATHS = [
+    "/data/adb/modules/adguardhomefree/scripts/control.sh",
+    "/data/adb/modules_update/adguardhomefree/scripts/control.sh"
+  ];
+
+  // 拼一条 sh 命令：逐个候选路径 `[ -f ]` 探测，命中即 exec 执行并返回。
+  // 用 exec 而不是嵌套子 shell，保证 ksu.exec 拿到的退出码/输出就是 control.sh 的。
+  function ctrlCommand(action) {
+    var cmd = "";
+    for (var i = 0; i < CTRL_PATHS.length; i++) {
+      cmd += "if [ -f '" + CTRL_PATHS[i] + "' ]; then exec sh '" + CTRL_PATHS[i] + "' " + action + "; fi; ";
+    }
+    return cmd + "exit 127";
+  }
 
   // 访问令牌：控制台 API 的 start/stop/restart 需要它（见 scripts/api.cgi）。
   // 令牌由 control.sh 在启动控制台时随机生成，仅 root 可读，用户需手动填入一次。
@@ -181,17 +197,21 @@
 
   function api(action, method) {
     if (inBridge) {
-      return ksuExec("sh " + CTRL + " " + action)
+      return ksuExec(ctrlCommand(action))
         .then(function (r) {
           if (r.errno !== 0) throw new Error((r.stderr || ("exit " + r.errno)).trim());
           return JSON.parse(r.stdout || "{}");
         });
     }
-    // fetch 路径经 busybox httpd -> api.cgi，启停动作必须带令牌 t
+    // fetch 路径经 busybox httpd -> api.cgi，启停动作必须带令牌。
+    // 走 X-Auth-Token 请求头而不是 ?t=：busybox httpd 会把完整请求行（含查询串）
+    // 写进 error log，令牌放 query 等于在 control.log 里多留一份明文副本，
+    // 而 api.token 设 600 的意义正是「只存一份、仅 root 可读」。
     var q = "?action=" + encodeURIComponent(action);
     var tk = getToken();
-    if (tk) { q += "&t=" + encodeURIComponent(tk); }
-    return fetch(API + q, { method: method || "GET", headers: { "Accept": "application/json" } })
+    var hdrs = { "Accept": "application/json" };
+    if (tk) { hdrs["X-Auth-Token"] = tk; }
+    return fetch(API + q, { method: method || "GET", headers: hdrs })
       .then(function (r) {
         if (r.status === 403) { throw new Error("访问令牌无效或已轮换"); }
         if (!r.ok) { throw new Error("HTTP " + r.status); }

@@ -144,6 +144,11 @@ if (-not (Test-Path -LiteralPath $BinPath)) {
             ($AghVersion -replace '^v', '')
         }
         Get-AdGuardHomeBinary -Version $dlVer -TargetArch $Arch
+        # 把解析出的真实版本回写到 $AghVersion：否则 -DownloadBinary 下产物仍叫
+        # AdGuardHomeFree-local-module.zip，与 CI 的 AdGuardHomeFree-<ver>-module.zip
+        # 以及 update.json 的 zipUrl 全都对不上，用户会拿到一个「看起来不是正式版」的包。
+        $AghVersion = $dlVer
+        $Artifact = Join-Path $OutDir "AdGuardHomeFree-$AghVersion-module.zip"
     } else {
         Write-Error "未找到 bin/AdGuardHome。请将 arm64 可执行文件放入 bin\AdGuardHome，或使用 -DownloadBinary 自动下载。"
     }
@@ -152,6 +157,46 @@ if (-not (Test-Path -LiteralPath $BinPath)) {
 # 确保二进制可执行（ZIP 打包后由 customize.sh 再 chmod，这里也兜底）
 if (-not (Test-Path -LiteralPath $BinPath)) {
     Write-Error "bin/AdGuardHome 仍缺失，无法继续。"
+}
+
+# ---------------------------------------------------------------------------
+# 归一化 shell 脚本的行尾与 BOM（与 CI 的 "Normalize shell script line endings to LF" 对齐）
+# ---------------------------------------------------------------------------
+# 这些 .sh 由 Android 的 sh 解析，customize.sh 更是被安装器 source 进安装器自己的
+# shell。Windows 上编辑后若带 CRLF，\r 会被当成命令/参数的一部分，表现为
+# "'\r': not found" 之类的诡异报错；被 source 的脚本尤其致命。
+# CI 已有该步骤，本地打包同样需要，否则会出现「CI 打的包能装、本地打的装不上」。
+# 按字节处理（去 BOM + 去掉所有 CR），不解码重编码，避免破坏 UTF-8 中文注释。
+Write-Step 'Normalizing shell script line endings (LF, no BOM)'
+$ShFiles = @(
+    'customize.sh',
+    'post-fs-data.sh',
+    'service.sh',
+    'uninstall.sh',
+    'scripts/common.sh',
+    'scripts/iptables.sh',
+    'scripts/watchdog.sh',
+    'scripts/control.sh',
+    'scripts/api.cgi'
+)
+foreach ($Rel in $ShFiles) {
+    $Full = Join-Path $Root $Rel
+    if (-not (Test-Path -LiteralPath $Full)) { continue }
+    $bytes = [System.IO.File]::ReadAllBytes($Full)
+    $start = 0
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        $start = 3
+    }
+    $changed = ($start -ne 0)
+    $out = New-Object 'System.Collections.Generic.List[byte]'
+    for ($i = $start; $i -lt $bytes.Length; $i++) {
+        if ($bytes[$i] -eq 0x0D) { $changed = $true; continue }
+        $out.Add($bytes[$i])
+    }
+    if ($changed) {
+        [System.IO.File]::WriteAllBytes($Full, $out.ToArray())
+        Write-Host "  normalized: $Rel"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -257,6 +302,16 @@ try {
     Write-Host "  ZIP entries: $($names.Count)"
 } finally {
     $zip.Dispose()
+}
+
+# 额外产出一份无版本名副本：CI 的 Release 除带版本号的包之外，还会上传
+# AdGuardHomeFree-module.zip 作为「始终指向最新」的资产，update.json 的 zipUrl
+# 就指向它（releases/latest/download/AdGuardHomeFree-module.zip）。
+# 本地打包同样产出一份，方便直接替换 Release 资产或验证自动更新链路。
+$LatestArtifact = Join-Path $OutDir 'AdGuardHomeFree-module.zip'
+if ($Artifact -ne $LatestArtifact) {
+    Copy-Item -LiteralPath $Artifact -Destination $LatestArtifact -Force
+    Write-Step "Latest alias -> $LatestArtifact"
 }
 
 Write-Step "Done -> $Artifact"

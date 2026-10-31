@@ -37,8 +37,19 @@ on:
         required: false
         default: ''
 
+# 同一分支/标签的构建串行化：并发 push 同时写同一个 Release 会互相覆盖资产
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   AGH_REPO: 'AdguardTeam/AdGuardHome'
+  # 钉住 AdGuard Home 版本（留空 = 跟随最新 release，即原有行为）。
+  # 为什么需要这个开关：bin/AdGuardHome.yaml 里 schema_version 是写死的（当前 34），
+  # 而 AGH 升级 schema 后首次启动会「静默原地迁移」用户的 /data/adb/agh/AdGuardHome.yaml；
+  # 之后若回退到旧模块（配旧版 AGH 二进制），AGH 会因 schema 只升不降而拒绝启动。
+  # 想可复现构建 / 想安全回退时，在这里填版本号（如 0.107.79）即可。
+  AGH_VERSION: ''
   # AdGuard Home 官方 release 中 Linux arm64 资产名为 .tar.gz（内部为裸二进制 AdGuardHome）
   AGH_ASSET: 'AdGuardHome_linux_arm64.tar.gz'
 
@@ -58,7 +69,8 @@ jobs:
         run: |
           set -eu
           # inputs.agh_version 仅在 workflow_dispatch 事件下有效；push/PR 下为空
-          VER="${{ github.event.inputs.agh_version || '' }}"
+          # 优先级：workflow_dispatch 输入 > env.AGH_VERSION 钉版本 > 最新 release
+          VER="${{ github.event.inputs.agh_version || env.AGH_VERSION || '' }}"
           if [ -n "$VER" ]; then
             VER="${VER#v}"
             echo "Verifying requested version v${VER}..."
@@ -124,6 +136,19 @@ jobs:
             echo "--- syntax check: $f"
             sh -n "$f"
           done
+
+      # sh -n 只查语法，查不出「nounset 下裸引用未定义变量」「未加引号的变量展开」
+      # 「命令替换吞掉退出码」这类问题 —— 本仓库最近两次事故恰好都属于这一类
+      # （customize.sh 的 set -u 泄漏、common.sh 的 $1 / $KSU_MODDIR 裸引用）。
+      # 只对 error 级别失败（-S error），warning 仅提示，避免历史遗留问题阻塞构建。
+      - name: ShellCheck
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck --version
+          shellcheck -s sh -S error customize.sh post-fs-data.sh service.sh uninstall.sh \
+                     scripts/common.sh scripts/iptables.sh scripts/watchdog.sh scripts/control.sh scripts/api.cgi
 
       # ---- 打包模块 ZIP ----
       - name: Package module ZIP

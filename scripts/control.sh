@@ -90,6 +90,14 @@ wait_port() {
 }
 
 do_start() {
+    # 幂等：已在运行就只补接管规则，不再起第二个实例。
+    # 否则连点两次「启动」会起第二个进程，它绑定 5591 失败退出，
+    # 看门狗随即判定「进程不在」又重启，日志里会出现莫名其妙的循环。
+    if agh_is_running && port_listening; then
+        sh "$MODDIR/scripts/iptables.sh" apply
+        echo "{\"ok\":true,\"action\":\"start\",\"dns\":true,\"already\":true}"
+        return 0
+    fi
     agh_start
     wait_port 15
     if port_listening; then

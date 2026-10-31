@@ -3,6 +3,9 @@
 # 由 Magisk / KernelSU / APatch 在卸载模块时调用（部分环境不保证执行）。
 
 MODDIR="$(cd "$(dirname "$0")" && pwd)"
+# 卸载路径不需要建目录：关掉 common.sh 的 mkdir 副作用，避免本脚本先重建
+# /data/adb/agh/logs、run，随后又 rm -rf 掉（见 scripts/common.sh 的说明）。
+AGHFREE_NO_MKDIR=1
 . "$MODDIR/scripts/common.sh"
 
 # 停止看门狗、控制台服务与 AdGuardHome 进程

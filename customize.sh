@@ -4,9 +4,26 @@
 #
 # 约定：安装器注入 $MODPATH 指向模块解包目录；缺失时回退到脚本自身目录，
 # 保证三家管理器（以及手工解包调试）都能正确解析路径。
-# 注意：这里只用 set -u，不使用 set -e —— 安装阶段任何一条非关键命令失败
-# （chmod、cp、缺少可选文件）都不应中断安装，否则用户会得到「安装成功但模块残缺」。
-set -u
+#
+# 【重要】本脚本是被安装器 source 执行的（[ -f customize.sh ] && . ./customize.sh），
+# 不是独立进程 —— 任何 set 变更都会残留到安装器后面的代码里。
+# 历史 bug：此处曾写 `set -u`，nounset 泄漏给安装器后，安装器执行
+# `for TARGET in $REPLACE` 时因本模块没有 REPLACE/replace_list 而直接终止，
+# 表现为日志里的 `sh: REPLACE: parameter not set` 加
+# `Error: Failed to install module script`（模块文件其实已解包完成）。
+#
+# 因此本脚本的约定是：
+#   1. 不启用任何 set 选项。set -e 同样不能用 —— 安装阶段 chmod / cp / 缺少可选
+#      文件之类的非关键失败不该中断安装，否则用户会得到「安装成功但模块残缺」。
+#   2. 开头显式 `set +u` 兜底，防止调用方开着 nounset 时把我们自己的逻辑带崩。
+#   3. 结尾**不**「恢复」nounset。恢复了就等于把地雷重新埋回安装器，
+#      下次换台设备/换版本又会以同样的方式失败。
+set +u
+
+# 双保险：安装器在本脚本返回后会执行 `for TARGET in $REPLACE`，而本模块没有
+# replace 文件，REPLACE 从未被赋值。这里预定义为空字符串，让那段循环零迭代。
+# 用 ${REPLACE-}（不带冒号）只在未定义时赋值，不覆盖安装器已有取值。
+REPLACE="${REPLACE-}"
 
 MODDIR="${MODPATH:-}"
 if [ -z "$MODDIR" ]; then

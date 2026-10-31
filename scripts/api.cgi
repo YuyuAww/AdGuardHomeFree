@@ -48,10 +48,18 @@ emit_headers() {
 
 # ---------- 参数解析（QUERY_STRING 由 httpd 注入） ----------
 QS="${QUERY_STRING:-}"
-ACTION="$(printf '%s' "$QS" | $BUSYBOX sed -n 's/.*action=\([^&]*\).*/\1/p')"
+
+# 逐参数解析：QUERY_STRING 不带前导 '?'，所以 '[?&]t=' 这种正则匹配不到
+# 「令牌放在第一个参数」的形式（?t=abc&action=stop → QUERY_STRING=t=abc&action=stop），
+# 会让完全合法的请求被误判成 403。这里先按 '&' 拆成多行，再按行首精确匹配。
+qs_get() {
+    printf '%s' "$QS" | $BUSYBOX tr '&' '\n' | $BUSYBOX sed -n "s/^$1=//p" | $BUSYBOX head -n1
+}
+
+ACTION="$(qs_get action)"
 [ -n "$ACTION" ] || ACTION="status"
 
-PROVIDED="$(printf '%s' "$QS" | $BUSYBOX sed -n 's/.*[?&]t=\([^&]*\).*/\1/p')"
+PROVIDED="$(qs_get t)"
 [ -n "$PROVIDED" ] || PROVIDED="${HTTP_X_AUTH_TOKEN:-}"
 
 TOKEN_FILE="$PID_DIR/api.token"
